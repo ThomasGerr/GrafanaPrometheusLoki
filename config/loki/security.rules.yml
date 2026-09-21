@@ -1,0 +1,198 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Security alerts, evaluated by the Loki ruler against system logs (journald).
+#
+# TEMPLATE. Loki's ruler is multi-tenant: a rule only ever sees the logs of the
+# tenant it is stored under. `make generate` therefore writes one copy per
+# client to config/loki/rules/<id>/, with __CLIENT__ replaced by the id. Edit
+# this file, never the copies.
+#
+# The static `client` label is what Alertmanager routes on. It comes from the
+# tenant the rule runs under, not from the log lines, so an agent cannot
+# redirect these alerts by lying about its client label.
+#
+# Everything here depends on the `program` label (journald's
+# SYSLOG_IDENTIFIER), set by agent/config.alloy. OpenSSH 9.8+ logs sessions as
+# `sshd-session`, older versions as `sshd`, hence the regex.
+# ─────────────────────────────────────────────────────────────────────────────
+
+groups:
+  - name: security
+    interval: 1m
+    rules:
+      # ── SSH ──────────────────────────────────────────────────────────────
+      #
+      # Any server with SSH open to the internet is probed all day long. On a
+      # key-only server that is noise, so this is `info`: recorded and sent
+      # to you once a day, never to the client. The alert below is the one
+      # that matters.
+      - alert: SSHBruteForce
+        expr: |
+          sum by (instance, ip) (
+            count_over_time(
+              {job="systemd", program=~"sshd|sshd-session"}
+                |~ "Failed (password|publickey)|Invalid user|Connection closed by (authenticating|invalid) user|maximum authentication attempts"
+                | regexp "(?P<ip>[0-9]{1,3}(\\.[0-9]{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+) port"
+              [10m]
+            )
+          ) > 50
+        labels:
+          severity: info
+          client: __CLIENT__
+        annotations:
+          summary: "SSH brute force against {{ $labels.instance }} from {{ $labels.ip }}"
+          description: >-
+            {{ $labels.ip }} made {{ $value }} failed SSH login attempts on
+            {{ $labels.instance }} in the last 10 minutes.
+          runbook: "docs/alert-runbook.md#sshbruteforce"
+
+      # The strongest signal in this file: an address that was failing to
+      # log in got in. Either a password was guessed, or someone mistyped a
+      # few times before succeeding. Both deserve a look.
+      - alert: SSHLoginAfterFailures
+        expr: |
+          sum by (instance, ip) (
+            count_over_time(
+              {job="systemd", program=~"sshd|sshd-session"}
+                |= "Accepted "
+                | regexp "from (?P<ip>\\S+) port"
+              [5m]
+            )
+          ) > 0
+          and on (instance, ip)
+          sum by (instance, ip) (
+            count_over_time(
+              {job="systemd", program=~"sshd|sshd-session"}
+                |~ "Failed (password|publickey)|Invalid user"
+                | regexp "(?P<ip>[0-9]{1,3}(\\.[0-9]{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+) port"
+              [1h]
+            )
+          ) >= 5
+        labels:
+          severity: critical
+          client: __CLIENT__
+        annotations:
+          summary: "SSH login on {{ $labels.instance }} after repeated failures from {{ $labels.ip }}"
+          description: >-
+            {{ $labels.ip }} logged in to {{ $labels.instance }} over SSH after at
+            least 5 failed attempts in the past hour. Confirm it was someone you
+            know.
+          runbook: "docs/alert-runbook.md#sshloginafterfailures"
+
+      - alert: SSHRootLogin
+        expr: |
+          sum by (instance, ip) (
+            count_over_time(
+              {job="systemd", program=~"sshd|sshd-session"}
+                |~ "Accepted \\S+ for root from"
+                | regexp "from (?P<ip>\\S+) port"
+              [5m]
+            )
+          ) > 0
+        labels:
+          severity: warning
+          client: __CLIENT__
+        annotations:
+          summary: "root logged in over SSH on {{ $labels.instance }}"
+          description: >-
+            Someone logged in as root on {{ $labels.instance }} from
+            {{ $labels.ip }}. Logging in as root directly leaves no trace of who
+            it was.
+          runbook: "docs/alert-runbook.md#sshrootlogin"
+
+      # ── sudo ─────────────────────────────────────────────────────────────
+      - alert: SudoAuthFailure
+        expr: |
+          sum by (instance) (
+            count_over_time(
+              {job="systemd", program="sudo"}
+                |~ "incorrect password attempts|NOT in sudoers|authentication failure"
+              [5m]
+            )
+          ) > 0
+        labels:
+          severity: warning
+          client: __CLIENT__
+        annotations:
+          summary: "Failed sudo attempt on {{ $labels.instance }}"
+          description: >-
+            Someone on {{ $labels.instance }} tried to use sudo and failed: a
+            wrong password, or an account that is not allowed to use sudo.
+          runbook: "docs/alert-runbook.md#sudoauthfailure"
+
+      # ── Accounts ─────────────────────────────────────────────────────────
+      - alert: UserAccountCreated
+        expr: |
+          sum by (instance, user) (
+            count_over_time(
+              {job="systemd", program="useradd"}
+                |= "new user:"
+                | regexp "name=(?P<user>[^,]+)"
+              [5m]
+            )
+          ) > 0
+        labels:
+          severity: warning
+          client: __CLIENT__
+        annotations:
+          summary: "New user account {{ $labels.user }} on {{ $labels.instance }}"
+          description: >-
+            A user account named {{ $labels.user }} was created on
+            {{ $labels.instance }}. Attackers often add an account to keep
+            access.
+          runbook: "docs/alert-runbook.md#useraccountcreated"
+
+      # Membership of these groups means full control of the machine. The
+      # docker group counts: anyone in it can start a container that mounts /.
+      # usermod/useradd and gpasswd (used by Debian's `adduser <user> <group>`)
+      # word it differently, hence two queries.
+      - alert: PrivilegedGroupChange
+        expr: |
+          sum by (instance, user, group) (
+            count_over_time(
+              {job="systemd", program=~"usermod|useradd"}
+                |~ "to (shadow )?group '(sudo|wheel|admin|root|docker)'"
+                | regexp "add '(?P<user>[^']+)' to (shadow )?group '(?P<group>[^']+)'"
+              [5m]
+            )
+          ) > 0
+          or
+          sum by (instance, user, group) (
+            count_over_time(
+              {job="systemd", program="gpasswd"}
+                |~ "added by \\S+ to group (sudo|wheel|admin|root|docker)$"
+                | regexp "user (?P<user>\\S+) added by \\S+ to group (?P<group>\\S+)"
+              [5m]
+            )
+          ) > 0
+        labels:
+          severity: warning
+          client: __CLIENT__
+        annotations:
+          summary: "{{ $labels.user }} added to {{ $labels.group }} on {{ $labels.instance }}"
+          description: >-
+            The account {{ $labels.user }} was added to the {{ $labels.group }}
+            group on {{ $labels.instance }}, which gives full control over the
+            server.
+          runbook: "docs/alert-runbook.md#privilegedgroupchange"
+
+      # ── Blind spots ──────────────────────────────────────────────────────
+      #
+      # Every rule above is silent when the logs stop, which is exactly what
+      # an attacker would want. A running host always writes something to
+      # the journal within the hour (timers, cron, the kernel). If the whole
+      # host is down, HostDown fires instead and suppresses this one.
+      - alert: SystemLogsMissing
+        expr: |
+          sum by (instance) (count_over_time({job="systemd"}[6h]))
+          unless
+          sum by (instance) (count_over_time({job="systemd"}[1h]))
+        for: 10m
+        labels:
+          severity: warning
+          client: __CLIENT__
+        annotations:
+          summary: "No system logs from {{ $labels.instance }} for an hour"
+          description: >-
+            {{ $labels.instance }} has stopped sending system logs, so none of
+            the security alerts can see what happens on it.
+          runbook: "docs/alert-runbook.md#systemlogsmissing"

@@ -411,6 +411,32 @@ datasources:
 """
 
 
+def gen_loki_rules(client: dict) -> str:
+    """
+    Loki's ruler only evaluates a rule against the tenant it is stored under,
+    so every tenant gets its own copy of the security rules, with the client
+    label pinned to that tenant's id.
+    """
+    template = (ROOT / "config/loki/security.rules.yml").read_text()
+    return BANNER + "# Template: config/loki/security.rules.yml\n" + template.replace(
+        "__CLIENT__", client["id"]
+    )
+
+
+def prune_loki_rules(clients: list[dict]) -> None:
+    """Remove rule copies left behind by clients that are no longer listed."""
+    rules_dir = ROOT / "config/loki/rules"
+    if not rules_dir.exists():
+        return
+    keep = {c["id"] for c in clients}
+    for d in sorted(rules_dir.iterdir()):
+        if d.is_dir() and d.name not in keep:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+            print(f"  removed    {d.relative_to(ROOT)}")
+
+
 def gen_onboarding(client: dict) -> str:
     cid = client["id"]
     probes = normalise_probes(client)
@@ -505,6 +531,12 @@ def main() -> None:
         ROOT / "config/grafana/provisioning/datasources/admin.yml",
         gen_grafana_admin_datasources(clients),
     )
+
+    # Every tenant, internal ones included: your own servers deserve the
+    # security alerts as much as a client's do.
+    for c in clients:
+        write(ROOT / f"config/loki/rules/{c['id']}/security.rules.yml", gen_loki_rules(c))
+    prune_loki_rules(clients)
 
     for c in real:
         write(ROOT / f"generated/onboarding/{c['id']}.md", gen_onboarding(c))

@@ -104,6 +104,7 @@ services:
     command: -config.file=/etc/loki/loki.yml
     volumes:
       - ./config/loki/loki.yml:/etc/loki/loki.yml:ro
+      - ./config/loki/rules:/etc/loki/rules:ro
       - loki-data:/loki
     networks: [monitor]
     logging: *default-logging

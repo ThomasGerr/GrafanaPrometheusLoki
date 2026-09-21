@@ -14,7 +14,11 @@ anchors = {
 }
 
 missing, total, unlinked = [], 0, []
-for f in sorted((ROOT / "config/prometheus/rules").glob("*.yml")):
+rule_files = sorted((ROOT / "config/prometheus/rules").glob("*.yml"))
+# Security alerts live in Loki. Check the template, not the per-tenant copies.
+rule_files.append(ROOT / "config/loki/security.rules.yml")
+
+for f in rule_files:
     text = f.read_text()
     for m in re.finditer(r'runbook:\s*"docs/alert-runbook\.md#([^"]+)"', text):
         total += 1

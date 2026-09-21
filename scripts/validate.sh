@@ -7,6 +7,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PROM_IMAGE=prom/prometheus:v3.13.2
 AM_IMAGE=prom/alertmanager:v0.34.0
 ALLOY_IMAGE=grafana/alloy:v1.19.0
+LOKI_IMAGE=grafana/loki:3.7.6
 
 fails=0
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -44,6 +45,58 @@ if out=$(docker run --rm -v "$PWD/config/alertmanager:/c:ro" --entrypoint /bin/s
 else
   bad "alertmanager config"; echo "$out" | sed 's/^/       /'
 fi
+
+# ── Loki security rules ────────────────────────────────────────────────────
+# The only real parser for LogQL rules is Loki itself, so start a throwaway
+# instance with the generated rules and ask its ruler what it loaded. A rule
+# file Loki cannot parse loads nothing, which shows up as a count mismatch.
+step "Loki security rules"
+net="validate-loki-$$"
+docker network create "$net" >/dev/null
+docker run -d --rm --name "$net" --network "$net" --network-alias loki \
+  -v "$PWD/config/loki/loki.yml:/etc/loki/loki.yml:ro" \
+  -v "$PWD/config/loki/rules:/etc/loki/rules:ro" \
+  --tmpfs /loki:uid=10001 "$LOKI_IMAGE" -config.file=/etc/loki/loki.yml >/dev/null
+if out=$(docker run --rm -i --network "$net" -v "$PWD/config/loki:/c:ro" python:3.13-slim python - <<'PY' 2>&1
+import pathlib, time, urllib.request
+def get(path, tenant=None):
+    headers = {"X-Scope-OrgID": tenant} if tenant else {}
+    with urllib.request.urlopen(urllib.request.Request("http://loki:3100" + path, headers=headers), timeout=5) as r:
+        return r.read().decode()
+for _ in range(60):
+    try:
+        get("/ready"); break
+    except Exception:
+        time.sleep(1)
+else:
+    raise SystemExit("Loki did not become ready")
+tenants = sorted(d for d in pathlib.Path("/c/rules").iterdir() if d.is_dir())
+problems, total = [], 0
+for d in tenants:
+    want = sum(f.read_text().count("- alert:") for f in d.glob("*.yml"))
+    for _ in range(15):
+        try:
+            got = get("/loki/api/v1/rules", d.name).count("- alert:")
+        except Exception:
+            got = 0
+        if got == want:
+            break
+        time.sleep(1)
+    total += got
+    if got != want:
+        problems.append(f"{d.name}: Loki loaded {got} of {want} rules")
+if problems:
+    raise SystemExit("\n".join(problems))
+print(f"{total} rules loaded across {len(tenants)} tenant(s)")
+PY
+); then
+  ok "$out"
+else
+  bad "loki rules"; echo "$out" | sed 's/^/       /'
+  docker logs "$net" 2>&1 | grep -iE "rule|parse" | grep -iv "alertmanager" | tail -5 | sed 's/^/       /'
+fi
+docker rm -f "$net" >/dev/null 2>&1
+docker network rm "$net" >/dev/null 2>&1
 
 # ── Alloy agent ────────────────────────────────────────────────────────────
 step "Agent config"
@@ -93,9 +146,9 @@ done
 step "clients.yml"
 if out=$(docker run --rm -v "$PWD:/w" -w /w python:3.13-slim sh -c \
           "pip install --quiet --disable-pip-version-check pyyaml >/dev/null 2>&1 && python scripts/generate.py" 2>&1); then
-  if grep -q "wrote " <<<"$out"; then
+  if grep -qE "wrote |removed " <<<"$out"; then
     bad "generated files are stale — run 'make generate' and commit the result"
-    grep "wrote " <<<"$out" | sed 's/^/       /'
+    grep -E "wrote |removed " <<<"$out" | sed 's/^/       /'
   else
     ok "all generated files are up to date"
   fi

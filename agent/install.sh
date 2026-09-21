@@ -68,9 +68,24 @@ INGEST_URL="${INGEST_URL%/}"
 
 HOST_NAME="${HOST_NAME:-$(hostname -s 2>/dev/null || hostname)}"
 
+# Where does journald keep its logs? On disk (/var/log/journal) is the usual
+# case, but some distributions keep them in memory only (/run/log/journal).
+# Never mount a path that does not exist: Docker would create it, and an empty
+# /var/log/journal quietly switches journald to on-disk storage.
+if [[ -d /var/log/journal ]]; then
+  JOURNAL_DIR=/var/log/journal
+elif [[ -d /run/log/journal ]]; then
+  JOURNAL_DIR=/run/log/journal
+else
+  JOURNAL_DIR="$INSTALL_DIR/no-journal"
+  mkdir -p "$JOURNAL_DIR"
+  echo "warning: no systemd journal found — system logs and security alerts will not work on this host" >&2
+fi
+
 info "client:  $CLIENT_ID"
 info "host:    $HOST_NAME"
 info "ingest:  $INGEST_URL"
+info "journal: $JOURNAL_DIR"
 
 # ── Fetch config ────────────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
@@ -115,6 +130,7 @@ CLIENT_ID=$CLIENT_ID
 HOST_NAME=$HOST_NAME
 INGEST_URL=$INGEST_URL
 INGEST_PASSWORD=$INGEST_PASSWORD
+JOURNAL_DIR=$JOURNAL_DIR
 ENVEOF
 chmod 600 "$INSTALL_DIR/.env"
 

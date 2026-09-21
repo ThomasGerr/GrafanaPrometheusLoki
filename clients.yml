@@ -6,6 +6,7 @@
 #   • config/prometheus/scrape/blackbox.yml       (uptime probe targets)
 #   • docker-compose.clients.yml                  (one prom-label-proxy each)
 #   • generated/grafana-orgs.json                 (input for `make bootstrap`)
+#   • config/loki/rules/<id>/                    (security alerts, per tenant)
 #   • generated/onboarding/<id>.md               (copy-paste install steps)
 #
 # Workflow:  edit this file → `make generate` → commit → Dokploy redeploys.

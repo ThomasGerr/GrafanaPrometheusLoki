@@ -121,6 +121,7 @@ derives from it:
 | `config/grafana/provisioning/datasources/admin.yml` | The admin Loki data source's tenant list changes with every client |
 | `generated/grafana-orgs.json` | Input for the bootstrap script, which is stdlib-only and so reads JSON rather than YAML |
 | `generated/onboarding/<id>.md` | The exact install command for that client |
+| `config/loki/rules/<id>/security.rules.yml` | Loki's ruler evaluates a rule only against the tenant it is stored under, so each tenant needs its own copy of `config/loki/security.rules.yml` |
 
 Generated files are committed. That is deliberate: the deployed state is
 whatever is in git, and a diff shows exactly what a client change did.

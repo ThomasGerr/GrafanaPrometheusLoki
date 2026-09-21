@@ -215,8 +215,28 @@ discovery.relabel "journal_logs" {
     source_labels = ["__journal_priority_keyword"]
     target_label  = "level"
   }
+
+  // The program that wrote the line (sshd, sudo, useradd, ...). sudo and the
+  // account tools run outside any systemd unit, so without this they cannot
+  // be told apart. The security alerts in config/loki/security.rules.yml
+  // depend on it. The set of programs on a host is small, so it is a safe
+  // label.
+  rule {
+    source_labels = ["__journal_syslog_identifier"]
+    target_label  = "program"
+  }
+
+  // loki.source.journal overwrites the `job` from its `labels` block with
+  // its own component name ("loki.source.journal.system"). Relabelling runs
+  // afterwards, so set it here; the security alerts select on job="systemd".
+  rule {
+    target_label = "job"
+    replacement  = "systemd"
+  }
 }
 
+// install.sh mounts the host's journal here, wherever the host keeps it
+// (/var/log/journal when stored on disk, /run/log/journal when in memory).
 loki.source.journal "system" {
   path          = "/var/log/journal"
   max_age       = "12h"

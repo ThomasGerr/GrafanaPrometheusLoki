@@ -101,6 +101,7 @@ services:
     command: -config.file=/etc/loki/loki.yml
     volumes:
       - ./config/loki/loki.yml:/etc/loki/loki.yml:ro
+      - ./config/loki/rules:/etc/loki/rules:ro
       - loki-data:/loki
     ports:
       - "127.0.0.1:${LOKI_PORT:-3100}:3100"

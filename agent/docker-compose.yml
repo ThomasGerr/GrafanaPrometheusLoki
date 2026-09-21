@@ -41,8 +41,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
-      # System logs.
-      - /var/log/journal:/var/log/journal:ro
+      # System logs. install.sh sets JOURNAL_DIR to wherever this host keeps
+      # its journal; the default covers installs from before it did.
+      - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
 
     logging:

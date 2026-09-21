@@ -35,11 +35,17 @@ need to open a port on a client's firewall.
 | **Containers** | CPU and memory per container, restart loops, out-of-memory kills, containers that disappear |
 | **Websites** | Whether it is up, how fast it responds, HTTP status, when the TLS certificate expires |
 | **Logs** | Container and system logs, searchable for 14 days |
+| **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups |
 | **Itself** | Broken alert rules, emails that failed to send, agents that stopped reporting |
 
-31 alert rules come included. Each one has an entry in the
+38 alert rules come included. Each one has an entry in the
 [alert runbook](docs/alert-runbook.md) that explains what it means and what to
 check.
+
+The security alerts read each server's system logs, and the **Security**
+dashboard shows the logins, `sudo` use and account changes behind them. They
+detect and warn; they do not block anything. To block attackers
+automatically, add a tool such as fail2ban or CrowdSec on the servers.
 
 ## What you need
 
@@ -52,7 +58,9 @@ check.
 - **An SMTP account** for sending alert emails.
 - **On your own computer:** Git, Docker, `make` and Python 3.
 
-Monitored servers only need Docker with the Compose plugin.
+Monitored servers only need Docker with the Compose plugin. For the security
+alerts they also need systemd (its journal holds the system logs), which
+nearly every Linux server has.
 
 > **Not using Dokploy?** Any host that runs Docker Compose will do, but you
 > will need to set up your own reverse proxy with HTTPS in front of
@@ -254,6 +262,7 @@ docker-compose.dev.yml       the same stack for your own computer
 docker-compose.clients.yml   generated: one metrics filter per client
 agent/                       what runs on each monitored server
 config/                      Prometheus, Alertmanager, Loki, Grafana and ingest settings
+  loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: Grafana setup and onboarding notes
 scripts/                     generator, Grafana setup, checks
 docs/                        architecture, onboarding, alert runbook

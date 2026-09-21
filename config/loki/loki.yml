@@ -26,7 +26,7 @@ common:
   storage:
     filesystem:
       chunks_directory: /loki/chunks
-      rules_directory: /loki/rules
+      rules_directory: /etc/loki/rules
 
 schema_config:
   configs:
@@ -84,13 +84,16 @@ compactor:
   retention_delete_delay: 2h
   delete_request_store: filesystem
 
+# Evaluates the security alerts. Rules are generated per tenant by
+# `make generate` into config/loki/rules/<id>/ and mounted read-only; the
+# ruler re-reads that directory every minute, so a redeploy is enough.
 ruler:
   alertmanager_url: http://alertmanager:9093
   enable_alertmanager_v2: true
   storage:
     type: local
     local:
-      directory: /loki/rules
+      directory: /etc/loki/rules
   rule_path: /loki/rules-tmp
   ring:
     kvstore:

@@ -248,6 +248,109 @@ anyone reports it.
 
 ---
 
+## Security alerts
+
+These come from each host's system logs, evaluated by Loki rather than
+Prometheus (`config/loki/security.rules.yml`). They only work on hosts whose
+agent ships the journal; see **SystemLogsMissing**. The **Security** dashboard
+shows the surrounding activity for every one of them.
+
+A security alert is a lead, not a verdict. Most turn out to be a colleague or
+a deploy script. The point is that someone checks.
+
+### SSHBruteForce
+
+One address made more than 50 failed SSH login attempts on a host within 10
+minutes.
+
+On any server with SSH open to the internet this happens every day, which is
+why it is `info`: you get it once a day, the client never does. It only
+matters if the server still accepts passwords. Check:
+
+```bash
+ssh <host> 'sudo sshd -T | grep -Ei "^(passwordauthentication|permitrootlogin)"'
+```
+
+`passwordauthentication no` means guessing cannot succeed, and you can ignore
+the noise. If it says `yes`, switch to keys only, or add fail2ban or CrowdSec
+to block repeat offenders.
+
+### SSHLoginAfterFailures
+
+An address failed to log in at least 5 times in the past hour, and then
+logged in successfully. **Treat this as serious until explained.**
+
+The harmless explanation is a person who mistyped their password or tried the
+wrong key a few times. The other one is a guessed password. Find out which:
+
+1. Open the **Security** dashboard for that host and read the *Successful SSH
+   logins* panel: which account, from which address, with a password or a
+   key.
+2. Ask whoever owns that account whether it was them, from that address.
+3. If nobody claims it, act as if the host is compromised: lock the account
+   (`sudo passwd -l <user>`), check `~/.ssh/authorized_keys` and recent
+   account changes, and look at what ran afterwards in *sudo commands*.
+
+### SSHRootLogin
+
+Someone logged in directly as `root` over SSH.
+
+Even when it is legitimate, logging in as root means the logs cannot tell you
+*who* it was. The usual fix is to log in with a personal account and use
+`sudo`, and to set `PermitRootLogin no` in `/etc/ssh/sshd_config`. If nobody
+expected a root login, handle it like **SSHLoginAfterFailures**.
+
+### SudoAuthFailure
+
+Someone on the host tried to use `sudo` and failed: a wrong password, or an
+account that is not allowed to use `sudo` at all.
+
+A single wrong password is usually a typo. Worry when the account is not in
+the sudoers file (*user NOT in sudoers*), or when it is an account that
+should not have a shell at all, such as a web server user. That pattern
+suggests someone got in through an application and is trying to escalate.
+The *sudo commands* panel shows which account and from which terminal.
+
+### UserAccountCreated
+
+A new user account was created on the host.
+
+Fine if someone just onboarded a colleague or installed a package that adds
+a service account. Attackers also add accounts to keep access. If nobody
+knows about it, check the account's groups (`id <user>`) and its
+`~/.ssh/authorized_keys`, then remove it (`sudo userdel -r <user>`).
+
+### PrivilegedGroupChange
+
+An account was added to `sudo`, `wheel`, `admin`, `root` or `docker`. Each
+of these gives full control over the server. `docker` is on the list because
+anyone who can start a container can mount the host's disk.
+
+Confirm the change was intended. If it was not, remove the membership
+(`sudo gpasswd -d <user> <group>`) and investigate the account like
+**UserAccountCreated**.
+
+### SystemLogsMissing
+
+A host sent system logs during the past 6 hours, but none in the last hour,
+while the host itself is still up. (If the whole host is down, **HostDown**
+fires instead and suppresses this alert.)
+
+Without system logs every other security alert is blind on that host, which
+is also exactly what someone covering their tracks would want. Check:
+
+```bash
+ssh <host> 'systemctl status systemd-journald; journalctl -n 5'
+ssh <host> 'docker logs --tail 50 grafana-prometheus-loki-agent'
+```
+
+A journald that was stopped, or a journal that was wiped (`journalctl` shows
+almost nothing), deserves suspicion. An agent error about the journal
+directory usually means the agent is older than its install script: re-run
+the install command to upgrade it.
+
+---
+
 ## Monitoring-stack alerts
 
 These go to you only. If one fires, treat every other alert as unreliable
