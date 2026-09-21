@@ -1,0 +1,17 @@
+# Secrets — never commit
+.env
+agent/.env
+
+# Note: everything else under generated/ IS committed on purpose. The deployed
+# state is whatever is in git, and a diff shows exactly what a client change
+# did. `make validate` fails if those files are stale.
+
+# Local state
+data/
+*.log
+
+# OS noise
+.DS_Store
+
+# `make render` output
+renders/

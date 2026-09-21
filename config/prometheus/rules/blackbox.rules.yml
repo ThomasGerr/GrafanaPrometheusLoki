@@ -1,0 +1,75 @@
+groups:
+  - name: uptime
+    rules:
+      # The alert clients actually feel. Probes run every 30s from the
+      # monitoring host, so 3m of failure means ~6 consecutive misses.
+      - alert: SiteDown
+        expr: probe_success == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is unreachable"
+          description: >-
+            External checks of {{ $labels.instance }} have failed for 3 minutes.
+            Visitors are seeing an error right now.
+          runbook: "docs/alert-runbook.md#sitedown"
+
+      - alert: SiteSlow
+        expr: probe_duration_seconds > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is responding slowly"
+          description: >-
+            Median response time is {{ $value | printf "%.1f" }}s, sustained for
+            15 minutes.
+          runbook: "docs/alert-runbook.md#siteslow"
+
+      - alert: HTTPUnexpectedStatus
+        expr: |
+          probe_http_status_code >= 400
+          and on (client, instance) probe_success == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} returning HTTP {{ $value | printf \"%.0f\" }}"
+          description: "The endpoint responds but with an error status."
+          runbook: "docs/alert-runbook.md#httpunexpectedstatus"
+
+      # ── TLS certificates ─────────────────────────────────────────────────
+      # Let's Encrypt renews at 30 days remaining. Alerting at 14 means
+      # renewal has already failed twice — it is a real problem, not noise.
+      - alert: SSLCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} expires in {{ $value | printf \"%.0f\" }} days"
+          description: >-
+            Automatic renewal appears to have failed. Check the ACME client on
+            that host before the certificate actually lapses.
+          runbook: "docs/alert-runbook.md#sslcertexpiringsoon"
+
+      - alert: SSLCertExpiryImminent
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 3
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} expires in {{ $value | printf \"%.1f\" }} days"
+          description: "Browsers will show a full-page security warning when this lapses."
+          runbook: "docs/alert-runbook.md#sslcertexpiringsoon"
+
+      - alert: SSLCertInvalid
+        expr: probe_ssl_last_chain_info == 0 and on (client, instance) probe_success == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS chain invalid for {{ $labels.instance }}"
+          description: "The certificate chain failed verification — often a missing intermediate."
+          runbook: "docs/alert-runbook.md#sslcertinvalid"

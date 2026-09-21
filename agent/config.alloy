@@ -1,0 +1,283 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// grafana-prometheus-loki agent
+//
+// One container per monitored host. It collects host metrics, container
+// metrics, container logs and system logs, then pushes everything outbound
+// to the central stack over HTTPS. Nothing listens on a public port.
+//
+// Configured entirely through environment variables — see .env.
+// ═══════════════════════════════════════════════════════════════════════════
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// METRICS
+// ───────────────────────────────────────────────────────────────────────────
+
+// Host metrics. Paths point at the read-only host mounts declared in
+// docker-compose.yml, so this reports the real machine rather than the
+// container's own namespaced view of it.
+prometheus.exporter.unix "host" {
+  rootfs_path = "/rootfs"
+  procfs_path = "/rootfs/proc"
+  sysfs_path  = "/rootfs/sys"
+
+  filesystem {
+    // Docker's overlay mounts would otherwise appear as hundreds of
+    // near-identical filesystems and swamp the disk panels.
+    mount_points_exclude = "^/(dev|proc|sys|run|var/lib/docker/.+|var/lib/containerd/.+)($|/)"
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_timeout        = "5s"
+  }
+
+  netdev {
+    device_exclude = "^(veth.*|docker[0-9]+|br-.*|lo)$"
+  }
+}
+
+// Container metrics via the built-in cAdvisor. Using Alloy's own exporter
+// keeps the agent to a single container instead of three.
+prometheus.exporter.cadvisor "containers" {
+  docker_host      = "unix:///var/run/docker.sock"
+  docker_only      = true
+  storage_duration = "5m"
+
+  // An allowlist, not a denylist. `disabled_metrics` looks like the natural
+  // choice here but panics Alloy v1.19.0 at startup on any value (nil deref
+  // inside the vendored cAdvisor manager), so the allowlist is the working
+  // form. It also keeps cardinality down, which is the point: the default set
+  // includes per-CPU and per-process series that nothing here queries.
+  enabled_metrics = ["cpu", "memory", "diskIO", "disk", "network", "oom_event"]
+}
+
+// Alloy's own health, so a half-broken agent is visible rather than silent.
+prometheus.exporter.self "agent" {}
+
+// Stamp the host identity onto every target. Without this the `instance`
+// label would be the exporter's loopback address, which is meaningless
+// once metrics from twenty hosts land in one Prometheus.
+discovery.relabel "host_metrics" {
+  targets = prometheus.exporter.unix.host.targets
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("HOST_NAME")
+  }
+  // Alloy's built-in exporters ship a `job` label of their own
+  // ("integrations/unix"), and a target label beats prometheus.scrape's
+  // job_name. Set it here or the central alert rules, which match
+  // job="node", never fire.
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+}
+
+discovery.relabel "container_metrics" {
+  targets = prometheus.exporter.cadvisor.containers.targets
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("HOST_NAME")
+  }
+  rule {
+    target_label = "job"
+    replacement  = "cadvisor"
+  }
+}
+
+discovery.relabel "agent_metrics" {
+  targets = prometheus.exporter.self.agent.targets
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("HOST_NAME")
+  }
+  rule {
+    target_label = "job"
+    replacement  = "alloy"
+  }
+}
+
+// The job names here are what the central alert rules match on
+// ("node", "cadvisor") — do not rename them without updating the rules.
+prometheus.scrape "host" {
+  targets         = discovery.relabel.host_metrics.output
+  forward_to      = [prometheus.remote_write.central.receiver]
+  job_name        = "node"
+  scrape_interval = "30s"
+}
+
+prometheus.scrape "containers" {
+  targets         = discovery.relabel.container_metrics.output
+  forward_to      = [prometheus.remote_write.central.receiver]
+  job_name        = "cadvisor"
+  scrape_interval = "30s"
+}
+
+prometheus.scrape "agent" {
+  targets         = discovery.relabel.agent_metrics.output
+  forward_to      = [prometheus.remote_write.central.receiver]
+  job_name        = "alloy"
+  scrape_interval = "60s"
+}
+
+prometheus.remote_write "central" {
+  // The tenant label. Every metric this agent sends is tagged with it, and
+  // the central label proxy uses it to decide who may see this data.
+  external_labels = {
+    client = sys.env("CLIENT_ID"),
+  }
+
+  endpoint {
+    url = sys.env("INGEST_URL") + "/api/v1/write"
+
+    basic_auth {
+      username = sys.env("CLIENT_ID")
+      password = sys.env("INGEST_PASSWORD")
+    }
+
+    // Survive a central-stack restart or a short network outage without
+    // losing data: samples buffer on disk and replay when the link returns.
+    queue_config {
+      capacity             = 10000
+      max_shards           = 10
+      min_shards           = 1
+      max_samples_per_send = 2000
+      batch_send_deadline  = "5s"
+      retry_on_http_429    = true
+    }
+  }
+
+  // Two hours of buffering is enough for a maintenance window.
+  wal {
+    truncate_frequency = "2h"
+    max_keepalive_time = "8h"
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// LOGS
+// ───────────────────────────────────────────────────────────────────────────
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+// Docker reports container names with a leading slash; strip it so the label
+// matches what `docker ps` shows and what the metrics use.
+discovery.relabel "container_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+
+  // Compose project, when there is one — handy for grouping in the UI.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.containers.targets
+  relabel_rules    = discovery.relabel.container_logs.rules
+  forward_to       = [loki.process.enrich.receiver]
+  refresh_interval = "15s"
+
+  labels = {
+    client   = sys.env("CLIENT_ID"),
+    instance = sys.env("HOST_NAME"),
+    job      = "docker",
+  }
+}
+
+// System logs: sshd, kernel, systemd units, unattended-upgrades.
+discovery.relabel "journal_logs" {
+  targets = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "system" {
+  path          = "/var/log/journal"
+  max_age       = "12h"
+  relabel_rules = discovery.relabel.journal_logs.rules
+  forward_to    = [loki.process.enrich.receiver]
+
+  labels = {
+    client   = sys.env("CLIENT_ID"),
+    instance = sys.env("HOST_NAME"),
+    job      = "systemd",
+  }
+}
+
+loki.process "enrich" {
+  forward_to = [loki.write.central.receiver]
+
+  // On a fresh install there is no read position yet, so loki.source.docker
+  // starts at the beginning of every container's log — a container that has
+  // been up since May replays months of history. Loki refuses anything older
+  // than reject_old_samples_max_age (168h in config/loki/loki.yml) and fails
+  // the push with a 400, so the agent discards the whole batch, current lines
+  // included. Drop the backlog here instead, before it is ever batched.
+  //
+  // 167h rather than 168h: the entry is timestamped at read time but judged
+  // at arrival, and a batch sitting in the queue during a retry must not age
+  // past the limit in flight.
+  stage.drop {
+    older_than          = "167h"
+    drop_counter_reason = "older_than_loki_window"
+  }
+
+  // Health-check chatter is the single largest source of useless log volume
+  // on a Dokploy host. Dropping it here saves storage and makes searching
+  // the remaining lines worthwhile.
+  stage.drop {
+    expression = "(?i)(GET|HEAD) /(health|healthz|ping|-/healthy|-/ready)"
+    drop_counter_reason = "healthcheck_noise"
+  }
+
+  // Cap absurd single lines (stack traces of embedded blobs) rather than
+  // letting one process blow through the tenant's ingest limit.
+  stage.match {
+    selector = "{job=\"docker\"}"
+    stage.limit {
+      rate  = 500
+      burst = 1000
+      drop  = true
+    }
+  }
+}
+
+loki.write "central" {
+  endpoint {
+    url = sys.env("INGEST_URL") + "/loki/api/v1/push"
+
+    basic_auth {
+      username = sys.env("CLIENT_ID")
+      password = sys.env("INGEST_PASSWORD")
+    }
+  }
+
+  // No tenant_id here on purpose. The ingest gateway sets X-Scope-OrgID from
+  // the authenticated username, so the tenant cannot be forged from this side.
+}

@@ -1,0 +1,101 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-binary Loki with multi-tenancy ON.
+#
+# auth_enabled: true means every read and write MUST carry an X-Scope-OrgID
+# header naming the tenant. The ingest gateway sets it from the authenticated
+# username on write; Grafana data sources set it per Org on read. This is a
+# hard storage-level boundary — not a query filter that can be worked around.
+# ─────────────────────────────────────────────────────────────────────────────
+
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  # Log lines from a busy host can be long.
+  grpc_server_max_recv_msg_size: 8388608
+  grpc_server_max_send_msg_size: 8388608
+
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+  filesystem:
+    directory: /loki/chunks
+
+limits_config:
+  # ── Retention: 14 days, enforced by the compactor below ────────────────
+  retention_period: 336h
+
+  # Reject clock-skewed or replayed data rather than corrupting the index.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+  # Docker/journal attributes ride along as structured metadata instead of
+  # becoming labels — keeps cardinality sane.
+  allow_structured_metadata: true
+  volume_enabled: true
+
+  # ── Per-tenant guard rails ─────────────────────────────────────────────
+  # A single misbehaving client cannot flood the shared instance.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_streams_per_user: 5000
+  max_global_streams_per_user: 5000
+  max_line_size: 256kb
+  max_entries_limit_per_query: 10000
+  max_query_series: 5000
+  max_query_lookback: 336h
+
+querier:
+  # The admin Org's data source sends every tenant at once as a pipe-separated
+  # X-Scope-OrgID ("self|acme"). Without this Loki rejects that
+  # header with "multiple org IDs present" and the admin Org sees no logs.
+  multi_tenant_queries_enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  # Without these two, retention_period above does nothing and the disk
+  # grows forever.
+  retention_enabled: true
+  retention_delete_delay: 2h
+  delete_request_store: filesystem
+
+ruler:
+  alertmanager_url: http://alertmanager:9093
+  enable_alertmanager_v2: true
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-tmp
+  ring:
+    kvstore:
+      store: inmemory
+  enable_api: true
+
+analytics:
+  reporting_enabled: false

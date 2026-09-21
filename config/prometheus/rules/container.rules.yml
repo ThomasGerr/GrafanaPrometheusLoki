@@ -1,0 +1,90 @@
+groups:
+  - name: containers
+    rules:
+      # cAdvisor reports cgroup roots with an empty `name`; every rule here
+      # filters those out and ignores the monitoring agent's own container.
+      - alert: ContainerRestartLoop
+        expr: |
+          changes(container_start_time_seconds{name!="", name!~"em-.*|alloy"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} is restart-looping on {{ $labels.instance }}"
+          description: >-
+            {{ $labels.name }} has restarted {{ $value | printf "%.0f" }} times in
+            15 minutes. It is crashing on startup — check its logs.
+          runbook: "docs/alert-runbook.md#containerrestartloop"
+
+      - alert: ContainerRestarted
+        expr: |
+          changes(container_start_time_seconds{name!="", name!~"em-.*|alloy"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "Container {{ $labels.name }} restarted on {{ $labels.instance }}"
+          description: "Expected during a deploy. Investigate if no deploy happened."
+          runbook: "docs/alert-runbook.md#containerrestarted"
+
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{name!=""}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} was OOM-killed on {{ $labels.instance }}"
+          description: >-
+            The kernel killed {{ $labels.name }} for exceeding its memory limit.
+            Either raise the limit or fix the leak — this will recur.
+          runbook: "docs/alert-runbook.md#containeroomkilled"
+
+      # Only meaningful where a memory limit is actually set; the `> 0` guard
+      # skips unlimited containers, whose spec limit cAdvisor reports as huge.
+      - alert: ContainerHighMemoryVsLimit
+        expr: |
+          (
+            container_memory_working_set_bytes{name!=""}
+              / on (client, instance, name)
+            container_spec_memory_limit_bytes{name!=""}
+          ) * 100 > 90
+          and on (client, instance, name) container_spec_memory_limit_bytes{name!=""} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} near its memory limit on {{ $labels.instance }}"
+          description: >-
+            Using {{ $value | printf "%.0f" }}% of its configured limit. The OOM
+            killer is the next step.
+          runbook: "docs/alert-runbook.md#containerhighmemoryvslimit"
+
+      - alert: ContainerHighCPU
+        expr: |
+          sum by (client, instance, name) (
+            rate(container_cpu_usage_seconds_total{name!=""}[5m])
+          ) * 100 > 90
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} using {{ $value | printf \"%.0f\" }}% of a core on {{ $labels.instance }}"
+          description: "Sustained high CPU for 20 minutes — a hot loop or genuine load."
+          runbook: "docs/alert-runbook.md#containerhighcpu"
+
+      # A container that was running and is now simply gone. Same push-based
+      # reasoning as HostDown: absence of the series is the signal.
+      - alert: ContainerDisappeared
+        expr: |
+          count_over_time(container_last_seen{name!="", name!~"em-.*|alloy"}[2h]) > 0
+          unless
+          count_over_time(container_last_seen{name!="", name!~"em-.*|alloy"}[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} disappeared from {{ $labels.instance }}"
+          description: >-
+            {{ $labels.name }} was running but is no longer present. Either it was
+            removed deliberately, or it exited and did not come back.
+          runbook: "docs/alert-runbook.md#containerdisappeared"

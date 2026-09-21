@@ -1,0 +1,49 @@
+modules:
+  # Standard website check: follows redirects, expects a 2xx, verifies TLS.
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []          # empty == any 2xx
+      method: GET
+      follow_redirects: true
+      fail_if_ssl: false
+      fail_if_not_ssl: true           # a client site MUST be HTTPS
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+
+  # For endpoints that legitimately answer 401/403 (protected admin panels)
+  # but should still prove they are alive and serving TLS.
+  http_2xx_or_auth:
+    prober: http
+    timeout: 10s
+    http:
+      valid_status_codes: [200, 201, 204, 301, 302, 401, 403]
+      method: GET
+      follow_redirects: false
+      fail_if_not_ssl: true
+      preferred_ip_protocol: ip4
+
+  # Health endpoints that must return a specific body.
+  http_health:
+    prober: http
+    timeout: 10s
+    http:
+      valid_status_codes: [200]
+      method: GET
+      fail_if_body_not_matches_regexp:
+        - "(?i)(ok|healthy|up|\"status\"\\s*:\\s*\"?(ok|up|healthy))"
+      fail_if_not_ssl: true
+      preferred_ip_protocol: ip4
+
+  # Plain reachability for non-HTTP services (SMTP, SSH, database ports).
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+
+  icmp_ping:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4

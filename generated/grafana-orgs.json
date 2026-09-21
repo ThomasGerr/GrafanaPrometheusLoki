@@ -1,0 +1,10 @@
+{
+  "clients": [
+    {
+      "id": "self",
+      "name": "Own infrastructure",
+      "users": []
+    }
+  ],
+  "all_tenants": "self"
+}

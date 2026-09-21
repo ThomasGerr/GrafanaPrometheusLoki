@@ -1,0 +1,91 @@
+groups:
+  # Monitoring the monitoring. If these fire, trust nothing else until fixed.
+  - name: meta
+    rules:
+      - alert: PrometheusRuleEvaluationFailing
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "Prometheus is failing to evaluate alert rules"
+          description: "Some alerts are silently not being checked. Fix immediately."
+          runbook: "docs/alert-runbook.md#prometheusruleevaluationfailing"
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "Prometheus config reload failed"
+          description: >-
+            Prometheus is running on its last good config. Whatever you just
+            deployed did not take effect.
+          runbook: "docs/alert-runbook.md#prometheusconfigreloadfailed"
+
+      - alert: AlertmanagerNotificationsFailing
+        expr: increase(alertmanager_notifications_failed_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "Alertmanager cannot deliver notifications ({{ $labels.integration }})"
+          description: >-
+            Alerts are firing but the emails are not arriving. Usually expired
+            or rejected SMTP credentials.
+          runbook: "docs/alert-runbook.md#alertmanagernotificationsfailing"
+
+      - alert: AlertmanagerConfigReloadFailed
+        expr: alertmanager_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "Alertmanager config reload failed"
+          description: "Routing changes from the last `make generate` did not apply."
+          runbook: "docs/alert-runbook.md#prometheusconfigreloadfailed"
+
+      - alert: LokiRequestErrors
+        expr: |
+          sum by (route) (rate(loki_request_duration_seconds_count{status_code=~"5.."}[10m]))
+            /
+          sum by (route) (rate(loki_request_duration_seconds_count[10m]))
+          > 0.05
+        for: 15m
+        labels:
+          severity: warning
+          client: self
+        annotations:
+          summary: "Loki is erroring on {{ $labels.route }}"
+          description: "Over 5% of requests are failing. Log ingestion or querying is degraded."
+          runbook: "docs/alert-runbook.md#lokirequesterrors"
+
+      - alert: PrometheusTSDBCompactionFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[3h]) > 0
+        for: 15m
+        labels:
+          severity: warning
+          client: self
+        annotations:
+          summary: "Prometheus TSDB compaction is failing"
+          description: "Usually disk pressure on the monitoring host. Retention will stop working."
+          runbook: "docs/alert-runbook.md#prometheustsdbcompactionfailing"
+
+      - alert: NoClientDataAtAll
+        expr: |
+          count(count by (client) (up{job="node", client!="self"})) == 0
+        for: 15m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "No client agents are reporting"
+          description: >-
+            Not a single client host is pushing metrics. The ingest gateway,
+            its credentials, or DNS is broken — not every client at once.
+          runbook: "docs/alert-runbook.md#noclientdataatall"

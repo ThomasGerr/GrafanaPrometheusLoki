@@ -1,0 +1,192 @@
+groups:
+  - name: host
+    rules:
+      # ── Agent / host reachability ────────────────────────────────────────
+      #
+      # Push-based collection means a dead host produces NO series at all,
+      # so the usual `up == 0` never fires — the series simply vanishes.
+      # Instead: "we saw this host recently, but not in the last 10 minutes".
+      # The 6h lookback bounds how long the alert can keep firing while the
+      # host stays down; after that Prometheus has no evidence it ever existed.
+      - alert: HostDown
+        expr: |
+          count_over_time(up{job="node"}[6h]) > 0
+          unless
+          count_over_time(up{job="node"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} has stopped reporting"
+          description: >-
+            No metrics received from {{ $labels.instance }} ({{ $labels.client }})
+            for over 10 minutes. The server is down, has lost network, or the
+            monitoring agent has stopped.
+          runbook: "docs/alert-runbook.md#hostdown"
+
+      # Agent is alive but one of its collectors is failing.
+      - alert: HostExporterFailing
+        expr: up{job=~"node|cadvisor"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} collector failing on {{ $labels.instance }}"
+          description: >-
+            The monitoring agent on {{ $labels.instance }} is running but its
+            {{ $labels.job }} collector cannot be scraped. Metrics from that
+            collector are missing.
+          runbook: "docs/alert-runbook.md#hostexporterfailing"
+
+      # ── CPU ──────────────────────────────────────────────────────────────
+      - alert: HostHighCPU
+        expr: |
+          100 - (avg by (client, instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU above 85% on {{ $labels.instance }}"
+          description: "CPU has averaged {{ $value | printf \"%.0f\" }}% for 15 minutes."
+          runbook: "docs/alert-runbook.md#hosthighcpu"
+
+      - alert: HostHighLoad
+        expr: |
+          node_load5
+            / on (client, instance) group_left
+          count by (client, instance) (node_cpu_seconds_total{mode="idle"})
+          > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Load average is {{ $value | printf \"%.1f\" }}x core count on {{ $labels.instance }}"
+          description: >-
+            5-minute load average is more than twice the number of CPU cores.
+            Processes are queueing for CPU or blocked on I/O.
+          runbook: "docs/alert-runbook.md#hosthighload"
+
+      # ── Memory ───────────────────────────────────────────────────────────
+      - alert: HostHighMemory
+        expr: |
+          (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory above 90% on {{ $labels.instance }}"
+          description: >-
+            {{ $value | printf "%.0f" }}% of RAM is in use. The next allocation
+            spike risks the OOM killer.
+          runbook: "docs/alert-runbook.md#hosthighmemory"
+
+      - alert: HostSwapping
+        expr: |
+          (1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100 > 50
+          and node_memory_SwapTotal_bytes > 0
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is swapping heavily"
+          description: "Over half of swap is in use. Expect latency across everything on this host."
+          runbook: "docs/alert-runbook.md#hostswapping"
+
+      # ── Disk ─────────────────────────────────────────────────────────────
+      - alert: HostDiskSpaceLow
+        expr: |
+          (1 -
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+          ) * 100 > 85
+          and node_filesystem_readonly == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} above 85% on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.0f\" }}% of {{ $labels.mountpoint }} is used."
+          runbook: "docs/alert-runbook.md#hostdiskspacelow"
+
+      - alert: HostDiskSpaceCritical
+        expr: |
+          (1 -
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+          ) * 100 > 95
+          and node_filesystem_readonly == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} above 95% on {{ $labels.instance }}"
+          description: >-
+            {{ $value | printf "%.0f" }}% used. Databases and Docker will start
+            failing writes shortly.
+          runbook: "docs/alert-runbook.md#hostdiskspacelow"
+
+      # Catches slow leaks well before they become an outage.
+      - alert: HostDiskWillFillIn24h
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}[6h],
+            24 * 3600
+          ) < 0
+          and node_filesystem_readonly == 0
+          and
+          (1 -
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+          ) * 100 > 60
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} on {{ $labels.instance }} will fill within 24h"
+          description: >-
+            At the current growth rate {{ $labels.mountpoint }} runs out of space
+            in under a day. Usually runaway logs, Docker images, or backups.
+          runbook: "docs/alert-runbook.md#hostdiskwillfillin24h"
+
+      - alert: HostInodesLow
+        expr: |
+          (1 -
+            node_filesystem_files_free{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+            /
+            node_filesystem_files{fstype!~"tmpfs|ramfs|squashfs|overlay|fuse.*"}
+          ) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Inodes above 90% on {{ $labels.mountpoint }} ({{ $labels.instance }})"
+          description: >-
+            The filesystem will refuse new files even though it reports free
+            space. Usually millions of small files in a cache or session dir.
+          runbook: "docs/alert-runbook.md#hostinodeslow"
+
+      # ── Misc host health ─────────────────────────────────────────────────
+      - alert: HostRebooted
+        expr: node_time_seconds - node_boot_time_seconds < 600
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.instance }} rebooted"
+          description: "The host booted less than 10 minutes ago. Expected after maintenance; investigate if not."
+          runbook: "docs/alert-runbook.md#hostrebooted"
+
+      - alert: HostClockSkew
+        expr: abs(node_timex_offset_seconds) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Clock drift on {{ $labels.instance }}"
+          description: >-
+            System clock is {{ $value | printf "%.2f" }}s off. Breaks TLS,
+            token validation, and makes these very metrics unreliable.
+          runbook: "docs/alert-runbook.md#hostclockskew"

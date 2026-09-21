@@ -1,0 +1,103 @@
+{{/* ───────────────────────────────────────────────────────────────────────
+     Alert emails go to clients as well as to you, so they avoid Prometheus
+     jargon and lead with what is affected and since when.
+     ─────────────────────────────────────────────────────────────────────── */}}
+
+{{ define "email.subject" -}}
+{{ if eq .Status "firing" }}{{ if eq .CommonLabels.severity "critical" }}[CRITICAL]{{ else if eq .CommonLabels.severity "warning" }}[Warning]{{ else }}[Notice]{{ end }}{{ else }}[Resolved]{{ end }}
+{{- with .CommonLabels.client }} {{ . }}:{{ end }}
+{{- if eq (len .Alerts) 1 }} {{ (index .Alerts 0).Annotations.summary }}
+{{- else }} {{ len .Alerts }} alerts ({{ .CommonLabels.alertname }})
+{{- end }}
+{{- end }}
+
+{{ define "email.html" -}}
+<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2933;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+
+        {{ if eq .Status "firing" }}
+        <tr><td style="background:{{ if eq .CommonLabels.severity "critical" }}#c92a2a{{ else if eq .CommonLabels.severity "warning" }}#e8590c{{ else }}#1971c2{{ end }};padding:18px 24px;">
+          <div style="color:#fff;font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">
+            {{ if eq .CommonLabels.severity "critical" }}Critical{{ else if eq .CommonLabels.severity "warning" }}Warning{{ else }}Notice{{ end }}
+          </div>
+          <div style="color:#fff;font-size:20px;font-weight:600;margin-top:4px;">
+            {{ len .Alerts.Firing }} issue{{ if ne (len .Alerts.Firing) 1 }}s{{ end }} detected
+          </div>
+        </td></tr>
+        {{ else }}
+        <tr><td style="background:#2b8a3e;padding:18px 24px;">
+          <div style="color:#fff;font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">Resolved</div>
+          <div style="color:#fff;font-size:20px;font-weight:600;margin-top:4px;">
+            {{ len .Alerts.Resolved }} issue{{ if ne (len .Alerts.Resolved) 1 }}s{{ end }} back to normal
+          </div>
+        </td></tr>
+        {{ end }}
+
+        {{ with .CommonLabels.client }}
+        <tr><td style="padding:14px 24px 0;font-size:13px;color:#616e7c;">
+          Environment: <strong style="color:#1f2933;">{{ . }}</strong>
+        </td></tr>
+        {{ end }}
+
+        <tr><td style="padding:8px 24px 24px;">
+          {{ range .Alerts }}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border:1px solid #e4e7eb;border-radius:8px;">
+            <tr><td style="padding:16px 18px;">
+              <div style="font-size:16px;font-weight:600;color:#1f2933;">{{ .Annotations.summary }}</div>
+              {{ with .Annotations.description }}
+              <div style="font-size:14px;line-height:1.55;color:#3e4c59;margin-top:8px;">{{ . }}</div>
+              {{ end }}
+
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:14px;font-size:13px;color:#616e7c;">
+                {{ with .Labels.instance }}
+                <tr><td style="padding:2px 12px 2px 0;">Host</td><td style="color:#1f2933;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ . }}</td></tr>
+                {{ end }}
+                {{ with .Labels.name }}
+                <tr><td style="padding:2px 12px 2px 0;">Container</td><td style="color:#1f2933;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ . }}</td></tr>
+                {{ end }}
+                {{ with .Labels.mountpoint }}
+                <tr><td style="padding:2px 12px 2px 0;">Filesystem</td><td style="color:#1f2933;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ . }}</td></tr>
+                {{ end }}
+                <tr><td style="padding:2px 12px 2px 0;">{{ if eq .Status "resolved" }}Resolved{{ else }}Started{{ end }}</td>
+                    <td style="color:#1f2933;">{{ if eq .Status "resolved" }}{{ .EndsAt.Format "02 Jan 2006 15:04 MST" }}{{ else }}{{ .StartsAt.Format "02 Jan 2006 15:04 MST" }}{{ end }}</td></tr>
+              </table>
+            </td></tr>
+          </table>
+          {{ end }}
+
+          <div style="margin-top:24px;">
+            <a href="__GRAFANA_URL__" style="display:inline-block;background:#1f2933;color:#fff;text-decoration:none;font-size:14px;font-weight:500;padding:11px 20px;border-radius:6px;">Open dashboards</a>
+          </div>
+        </td></tr>
+
+        <tr><td style="padding:16px 24px;background:#f4f5f7;font-size:12px;color:#7b8794;line-height:1.5;">
+          Sent by your monitoring service. You are receiving this because this system is covered by your monitoring agreement.
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+{{- end }}
+
+{{/* Plain-text fallback for mail clients that refuse HTML. */}}
+{{ define "email.text" -}}
+{{ if eq .Status "firing" }}{{ len .Alerts.Firing }} issue(s) detected{{ else }}{{ len .Alerts.Resolved }} issue(s) resolved{{ end }}
+{{ with .CommonLabels.client }}Environment: {{ . }}
+{{ end }}
+{{ range .Alerts }}
+--------------------------------------------------------------
+{{ .Annotations.summary }}
+{{ with .Annotations.description }}{{ . }}
+{{ end }}{{ with .Labels.instance }}Host:      {{ . }}
+{{ end }}{{ with .Labels.name }}Container: {{ . }}
+{{ end }}{{ if eq .Status "resolved" }}Resolved:  {{ .EndsAt.Format "02 Jan 2006 15:04 MST" }}{{ else }}Started:   {{ .StartsAt.Format "02 Jan 2006 15:04 MST" }}{{ end }}
+{{ end }}
+--------------------------------------------------------------
+Dashboards: __GRAFANA_URL__
+{{- end }}

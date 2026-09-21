@@ -1,0 +1,46 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SINGLE SOURCE OF TRUTH
+#
+# Everything per-client is generated from this file:
+#   • config/alertmanager/alertmanager.yml.tmpl   (routes + email receivers)
+#   • config/prometheus/scrape/blackbox.yml       (uptime probe targets)
+#   • docker-compose.clients.yml                  (one prom-label-proxy each)
+#   • generated/grafana-orgs.json                 (input for `make bootstrap`)
+#   • generated/onboarding/<id>.md               (copy-paste install steps)
+#
+# Workflow:  edit this file → `make generate` → commit → Dokploy redeploys.
+#
+# The `id` is load-bearing. It is simultaneously:
+#   - the `client` label on every metric from that client
+#   - the Loki tenant id
+#   - the basic-auth username in INGEST_USERS
+#   - the Grafana Org name key
+# Once a client is live, changing its id orphans all their historical data.
+# ═══════════════════════════════════════════════════════════════════════════
+
+clients:
+
+  # Your own infrastructure. The monitoring host itself reports under this id
+  # (see config/prometheus/prometheus.yml and the meta alert rules), so keep
+  # it as `self` unless you also change those. It still gets full metrics and
+  # logs, visible in your admin Org alongside every client.
+  - id: self
+    name: "Own infrastructure"
+    email: ops@example.com
+    probes:
+      - url: https://example.com
+      # - url: https://admin.example.com
+      #   module: http_2xx_or_auth     # accept 401/403 for login-protected apps
+
+  # ── Example client — uncomment and adapt ────────────────────────────────
+  # - id: acme
+  #   name: "Acme B.V."
+  #   email: ops@acme.example          # where their alerts go
+  #   grafana_users:
+  #     - login: jane
+  #       email: jane@acme.example
+  #       name: "Jane Doe"
+  #   probes:
+  #     - url: https://acme.example
+  #     - url: https://app.acme.example/health
+  #       module: http_2xx_or_auth

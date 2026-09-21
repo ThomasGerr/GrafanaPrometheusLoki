@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# grafana-prometheus-loki agent — runs on each monitored host.
+#
+# Installed to /opt/grafana-prometheus-loki-agent by install.sh. One container; it
+# opens no inbound ports and only ever connects outbound to the ingest URL.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  alloy:
+    image: grafana/alloy:v1.19.0
+    container_name: grafana-prometheus-loki-agent
+    restart: unless-stopped
+
+    # Needed to read the host's cgroups, processes and block devices.
+    # This is the same access cAdvisor and node_exporter normally require.
+    privileged: true
+    pid: host
+
+    command:
+      - run
+      # Bound to loopback: the agent's own UI is for local debugging only.
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+
+    environment:
+      CLIENT_ID: ${CLIENT_ID:?CLIENT_ID is required}
+      HOST_NAME: ${HOST_NAME:?HOST_NAME is required}
+      INGEST_URL: ${INGEST_URL:?INGEST_URL is required}
+      INGEST_PASSWORD: ${INGEST_PASSWORD:?INGEST_PASSWORD is required}
+
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      # Write-ahead log. Metrics survive a central outage and replay on
+      # reconnect, so a maintenance window leaves no gap in the graphs.
+      - alloy-data:/var/lib/alloy/data
+      # Host filesystem, read-only — node metrics.
+      - /:/rootfs:ro,rslave
+      - /sys:/sys:ro
+      # Container metrics and logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+      # System logs.
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  alloy-data:

@@ -1,0 +1,15 @@
+{
+  "_comment": "Panels `make render` exports as PNG, once per client. `dashboard` is the dashboard uid, `panel` the panel id inside it (see config/grafana/dashboards/*.json). Multi-value variables such as Host or Site are always rendered as All.",
+  "width": 1000,
+  "height": 400,
+  "timezone": "Europe/Amsterdam",
+  "panels": [
+    { "name": "cpu",              "dashboard": "em-host-overview", "panel": 7 },
+    { "name": "memory",           "dashboard": "em-host-overview", "panel": 8 },
+    { "name": "disk",             "dashboard": "em-host-overview", "panel": 12 },
+    { "name": "container-memory", "dashboard": "em-containers",    "panel": 8 },
+    { "name": "reachability",     "dashboard": "em-uptime",        "panel": 9 },
+    { "name": "response-time",    "dashboard": "em-uptime",        "panel": 8 },
+    { "name": "log-volume",       "dashboard": "em-logs",          "panel": 5 }
+  ]
+}
