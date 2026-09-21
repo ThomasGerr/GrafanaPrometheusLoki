@@ -45,8 +45,7 @@ make validate
 ```
 
 `generate` rewrites the Alertmanager routes, the blackbox probe targets, the
-per-client label proxy service, and writes `generated/onboarding/acme.md` with
-the exact install command for their servers.
+per-client label proxy service and their copy of the security alert rules.
 
 ## 3. Create their ingest credential
 

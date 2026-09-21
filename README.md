@@ -181,9 +181,8 @@ client reports in. That is expected.
 6. Install the agent on each of their servers, as in step 5 above, with
    `--client acme` and their password.
 
-`make generate` also writes `generated/onboarding/acme.md`, with the exact
-install command for that client. For more detail, including how to remove a
-client, see [docs/onboarding-a-client.md](docs/onboarding-a-client.md).
+For more detail, including how to remove a client, see
+[docs/onboarding-a-client.md](docs/onboarding-a-client.md).
 
 ## Trying it on your own computer
 
@@ -263,7 +262,7 @@ docker-compose.clients.yml   generated: one metrics filter per client
 agent/                       what runs on each monitored server
 config/                      Prometheus, Alertmanager, Loki, Grafana and ingest settings
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
-generated/                   generated: Grafana setup and onboarding notes
+generated/                   generated: input for the Grafana setup
 scripts/                     generator, Grafana setup, checks
 docs/                        architecture, onboarding, alert runbook
 ```
