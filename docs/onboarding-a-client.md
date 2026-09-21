@@ -57,7 +57,7 @@ openssl rand -base64 24
 Append it to `INGEST_USERS` in the Dokploy Environment tab:
 
 ```
-INGEST_USERS=acme:<generated>,globex:<other>
+INGEST_USERS=self:<existing>,acme:<generated>
 ```
 
 The username **must** equal the `id`. The ingest gateway derives the Loki

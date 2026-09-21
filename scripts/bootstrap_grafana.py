@@ -210,7 +210,9 @@ def load_env_file() -> None:
 def main() -> None:
     load_env_file()
 
-    url = os.environ.get("GRAFANA_URL") or os.environ.get("GRAFANA_ROOT_URL") or "http://localhost:3000"
+    # Deliberately not GRAFANA_ROOT_URL: .env carries the public URL, and a
+    # plain `make bootstrap` against `make up` must stay on localhost.
+    url = os.environ.get("GRAFANA_URL") or "http://localhost:3000"
     admin_user = os.environ.get("GRAFANA_ADMIN_USER") or os.environ.get("GF_SECURITY_ADMIN_USER", "admin")
     password = os.environ.get("GRAFANA_ADMIN_PASSWORD") or os.environ.get("GF_SECURITY_ADMIN_PASSWORD")
 

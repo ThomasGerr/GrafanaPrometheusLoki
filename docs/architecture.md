@@ -143,6 +143,26 @@ No credential is ever written into the repo.
 
 Everything else lives in the Dokploy Environment tab.
 
+## Networking on Dokploy
+
+`docker-compose.yml` publishes **no ports at all**. Every service sits on the
+private `em-monitor` bridge and talks to its neighbours by container name; the
+only way in is the Traefik route you configure in the Dokploy interface. That
+means Prometheus, Alertmanager, Loki and blackbox are unreachable from the
+internet by construction rather than by a loopback binding.
+
+Two consequences:
+
+- `make bootstrap-server` joins `em-monitor` to reach Grafana, because neither
+  `localhost` nor a public URL behind Cloudflare works from the host itself.
+- `ssh -L` has nothing to forward to, so `make tunnel` starts a temporary
+  proxy on the server's loopback instead.
+
+If Traefik does not route to `grafana` or `ingest`, it is the known Dokploy
+compose networking gotcha: uncomment the `dokploy-network` block at the bottom
+of `docker-compose.yml`, add that network to both services, and label them
+`traefik.docker.network=dokploy-network`.
+
 ## Retention
 
 30 days of metrics, 14 days of logs, both on local disk. No object storage,

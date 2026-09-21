@@ -1,224 +1,267 @@
 # GrafanaPrometheusLoki
 
-Central monitoring for your organisation and its clients. One stack, one place to look,
-each client seeing only their own systems.
+Watch your clients' servers and websites from one place. Get an email when
+something breaks. Give every client their own dashboards, where they can see
+only their own systems.
 
-Prometheus for metrics, Loki for logs, Alertmanager for email alerts, Grafana
-for dashboards. Deployed as a Docker Compose stack on Dokploy. Each monitored
-server runs a single lightweight agent that pushes data outbound — no inbound
-ports, nothing to open on a client firewall.
+Built on open-source tools: Prometheus (metrics), Loki (logs), Alertmanager
+(email alerts) and Grafana (dashboards). It is made for people who look after
+servers for several clients, such as agencies, freelancers and small hosting
+providers.
 
 ```
-CLIENT SERVER (xN)                 CENTRAL STACK (Dokploy)
+CLIENT SERVER (xN)                 CENTRAL STACK (your monitoring server)
 ┌───────────────────┐              ┌──────────────────────────────────────────┐
-│ Grafana Alloy     │  HTTPS       │ ingest (nginx)  ← Traefik/Dokploy domain │
-│  • host metrics   │  basic auth  │   authenticates, stamps the tenant       │
-│  • container      │─────────────▶│      ├──▶ Prometheus  (30d retention)    │
-│    metrics        │  outbound    │      └──▶ Loki        (14d retention)    │
+│ Grafana Alloy     │  HTTPS       │ ingest (nginx)                           │
+│  • host metrics   │  password    │   checks the password, tags the client   │
+│  • container      │─────────────▶│      ├──▶ Prometheus  (30 days)          │
+│    metrics        │  outbound    │      └──▶ Loki        (14 days)          │
 │  • docker logs    │  only        │                                          │
 │  • system logs    │              │ Alertmanager ──▶ email (you + client)    │
-└───────────────────┘              │ Blackbox exporter — probes sites         │
-                                   │ prom-label-proxy × N — tenant boundary   │
+└───────────────────┘              │ Blackbox exporter — checks websites      │
+                                   │ prom-label-proxy × N — keeps data apart  │
    CLIENT WEBSITES ◀───────────────│ Grafana — one Org per client             │
-        uptime + TLS probes        └──────────────────────────────────────────┘
+     uptime + certificate checks   └──────────────────────────────────────────┘
 ```
+
+Each monitored server runs one small agent that *sends* data to you. You never
+need to open a port on a client's firewall.
 
 ## What it watches
 
 | | |
 |---|---|
-| **Hosts** | CPU, memory, disk (including "will fill within 24h"), inodes, load, network, clock drift, reboots |
-| **Containers** | Per-container CPU and memory, memory-vs-limit, restart loops, OOM kills, containers that vanish |
-| **Websites** | Reachability, response time, HTTP status, TLS certificate expiry — probed from outside |
-| **Logs** | Container and system logs, searchable, retained 14 days |
-| **Itself** | Failed rule evaluations, undelivered alerts, config reload failures, agents that stop reporting |
+| **Servers** | CPU, memory, disk (including "will be full within 24h"), load, network, clock drift, reboots |
+| **Containers** | CPU and memory per container, restart loops, out-of-memory kills, containers that disappear |
+| **Websites** | Whether it is up, how fast it responds, HTTP status, when the TLS certificate expires |
+| **Logs** | Container and system logs, searchable for 14 days |
+| **Itself** | Broken alert rules, emails that failed to send, agents that stopped reporting |
 
-## Quick start (local)
+31 alert rules come included. Each one has an entry in the
+[alert runbook](docs/alert-runbook.md) that explains what it means and what to
+check.
+
+## What you need
+
+- **A server** for the monitoring stack, running [Dokploy](https://dokploy.com),
+  with Git and `make` installed. 2 vCPU and 4 GB RAM is enough for about 20
+  monitored servers.
+- **A domain** with two hostnames pointing at that server, for example
+  `monitor.example.com` (Grafana) and `ingest.example.com` (where agents send
+  data).
+- **An SMTP account** for sending alert emails.
+- **On your own computer:** Git, Docker, `make` and Python 3.
+
+Monitored servers only need Docker with the Compose plugin.
+
+> **Not using Dokploy?** Any host that runs Docker Compose will do, but you
+> will need to set up your own reverse proxy with HTTPS in front of
+> `grafana` (port 3000) and `ingest` (port 8080). The steps below assume
+> Dokploy.
+
+## The key idea: `clients.yml`
+
+Every client is described in one file, `clients.yml`. Each client has an
+**id**: a short, lowercase name like `acme`. The id is used everywhere: in the
+agent's login, in the stored data, and in Grafana. Choose it carefully,
+because changing it later cuts the client off from their history.
+
+One client, `self`, is already there. It stands for your own servers,
+including the monitoring server itself.
+
+Never edit the other config files by hand. After you change `clients.yml`,
+run `make generate` to rebuild them.
+
+## Getting started
+
+### 1. Get the code
+
+Fork this repository and clone your fork. Dokploy deploys straight from it.
+
+The agent installer downloads its files from GitHub. If your fork has a
+different owner or name, update that URL in `agent/install.sh` and
+`scripts/generate.py`.
+
+### 2. Describe yourself
+
+Open `clients.yml`. Put your own email address and websites on the `self`
+entry, then run:
 
 ```bash
-cp .env.example .env      # fill in at least the Grafana and ingest values
-make up
-make bootstrap            # creates Grafana Orgs, logins, data sources, dashboards
+make generate     # rebuild the config from clients.yml
+make validate     # check everything before you deploy
+git commit -am "Set up self" && git push
 ```
 
-`make up` runs `docker-compose.dev.yml` — the same stack with ports published
-on `127.0.0.1` so you can open it in a browser. The production file publishes
-nothing.
+### 3. Deploy on Dokploy
 
-Grafana lands on http://localhost:3000. `make help` lists everything else.
+1. Create a new service: **Docker Compose**, pointed at your fork, using
+   `docker-compose.yml`.
+2. **Environment** tab: paste in the contents of `.env.example` and replace
+   every value. Every value is required; Grafana will not even start without
+   `RENDERER_TOKEN`. Generate passwords and tokens with
+   `openssl rand -base64 24`.
+3. **Domains** tab: route `monitor.example.com` to service `grafana`, port
+   3000, and `ingest.example.com` to service `ingest`, port 8080. Point the
+   DNS records at your server *first*, or the HTTPS certificate will fail.
+4. Click **Deploy**.
 
-## Adding a client
+If the domains do not work, see
+[Networking on Dokploy](docs/architecture.md#networking-on-dokploy).
 
-`clients.yml` is the single source of truth. Everything per-client is generated
-from it.
+### 4. Set up Grafana
 
-```yaml
-clients:
-  - id: acme                     # metric label, Loki tenant, ingest username
-    name: "Acme B.V."
-    email: ops@acme.example           # where their alerts go
-    grafana_users:
-      - login: jan
-        email: jan@acme.example
-        name: "Jan de Vries"
-    probes:
-      - url: https://acme.example
-      - url: https://app.acme.example/health
-        module: http_health
-```
-
-Then:
+On the monitoring server, clone your fork and run:
 
 ```bash
-make generate     # rebuilds routes, probes, label proxies, onboarding notes
-make validate     # catches mistakes before they reach production
-git commit -am "add acme" && git push      # Dokploy redeploys
-make bootstrap    # creates their Org and prints their login once
+GF_SECURITY_ADMIN_PASSWORD='<your Grafana admin password>' make bootstrap-server
 ```
 
-`generated/onboarding/<id>.md` is written for each client with the exact
-install command for their servers. Full walkthrough:
-[docs/onboarding-a-client.md](docs/onboarding-a-client.md).
+This creates the Grafana Orgs, logins, data sources and dashboards. Any new
+login passwords are printed **once**, so save them straight away. Then log in
+at `https://monitor.example.com` as `admin`.
 
-## Installing the agent on a server
+### 5. Install the agent on the monitoring server
+
+Use the `self` password from `INGEST_USERS`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
-  | sudo bash -s -- --client acme --ingest https://ingest.example.com --password '<password>'
+  | sudo bash -s -- --client self --ingest https://ingest.example.com --password '<password>'
 ```
 
-One container. Re-running upgrades it. Also install it on the monitoring host
-itself with `--client self`, so the machine running all this is watched too.
+Within a minute, the **Host Overview** dashboard shows the server. Running the
+same command again later upgrades the agent.
 
-## Deploying on Dokploy
+The `NoClientDataAtAll` alert stays on until the agent of your first real
+client reports in. That is expected.
 
-1. New service → **Docker Compose** → point it at this repo, `docker-compose.yml`.
-2. **Environment** tab: paste `.env.example` and fill it in. `INGEST_USERS`
-   needs one `clientid:password` pair per client — generate with
-   `openssl rand -base64 24`.
-3. **Domains** tab: route `grafana` (port 3000) and `ingest` (port 8080).
-   Suggested: `monitor.example.com` and `ingest.example.com`. Point
-   the DNS A records at the server first, or certificate issuance fails.
-   Nothing else gets a domain.
-4. Deploy, then run `make bootstrap-server` on the host. It reaches Grafana
-   over the stack's internal network — the deployed stack publishes no ports,
-   and the public URL sits behind Cloudflare, which blocks the script. From
-   your own machine, `GRAFANA_URL=https://monitor.example.com make bootstrap`.
+## Adding a client
 
-`docker-compose.yml` publishes **no ports at all**. Every service sits on the
-private `em-monitor` bridge and talks to its neighbours by container name; the
-only way in is the Traefik route you configure in the Dokploy interface. That
-means Prometheus, Alertmanager, Loki and blackbox are unreachable from the
-internet by construction rather than by a loopback binding.
+1. Add them to `clients.yml`:
 
-If Traefik does not route to `grafana` or `ingest`, it is the known Dokploy
-compose networking gotcha — uncomment the `dokploy-network` block at the bottom
-of `docker-compose.yml`, add that network to both services, and label them
-`traefik.docker.network=dokploy-network`.
+   ```yaml
+   clients:
+     - id: acme                       # short, lowercase, never changes
+       name: "Acme B.V."
+       email: ops@acme.example        # where their alerts go
+       grafana_users:                 # optional: dashboard logins for them
+         - login: jane
+           email: jane@acme.example
+           name: "Jane Doe"
+       probes:                        # optional: websites to check
+         - url: https://acme.example
+         - url: https://app.acme.example/health
+           module: http_health
+   ```
 
-Because nothing is published, `ssh -L` has nothing to forward to. To reach
-Prometheus or Alertmanager on the server, start a temporary proxy there:
+2. Rebuild, check and publish:
+
+   ```bash
+   make generate
+   make validate
+   git commit -am "Add acme" && git push      # Dokploy redeploys
+   ```
+
+3. Create a password for their agent (`openssl rand -base64 24`) and add it
+   to `INGEST_USERS` in Dokploy, so it reads `self:...,acme:<password>`.
+   Redeploy.
+4. On the monitoring server, `git pull` and run `make bootstrap-server` again.
+   It prints their Grafana login once.
+5. Run `make check-tenancy` on the monitoring server. It proves the new client
+   cannot see anyone else's data.
+6. Install the agent on each of their servers, as in step 5 above, with
+   `--client acme` and their password.
+
+`make generate` also writes `generated/onboarding/acme.md`, with the exact
+install command for that client. For more detail, including how to remove a
+client, see [docs/onboarding-a-client.md](docs/onboarding-a-client.md).
+
+## Trying it on your own computer
 
 ```bash
-make tunnel        # on the server
-ssh -L 9090:localhost:9090 -L 9093:localhost:9093 <server>
-make untunnel      # when you are done
+cp .env.example .env      # fill in the values
+make up                   # start the stack
+make bootstrap            # set up Grafana
 ```
 
-Sizing: a 2 vCPU / 4 GB VPS comfortably handles around 20 monitored hosts at
-these retention settings.
+Open http://localhost:3000. Without any agents you will only see the stack
+watching itself. `make down` stops it again.
 
-## Exporting panels as images
+## Everyday commands
+
+```bash
+make help            # list every command
+make validate        # run before every commit
+make logs S=loki     # follow the logs of one service
+make reload          # apply config changes to Prometheus and Alertmanager
+make routes C=acme   # show who gets an alert for acme
+make check-tenancy   # prove clients cannot see each other's data
+```
+
+### Reaching Prometheus or Alertmanager on the server
+
+The deployed stack only exposes Grafana and ingest. To open the others for a
+while:
+
+```bash
+make tunnel                                                  # on the server
+ssh -L 9090:localhost:9090 -L 9093:localhost:9093 <server>   # on your computer
+make untunnel                                                # on the server, when done
+```
+
+While the tunnel is open, Prometheus is at http://localhost:9090 and
+Alertmanager at http://localhost:9093.
+
+### Exporting dashboard panels as images
+
+On the monitoring server:
 
 ```bash
 make render                          # every client, last 7 days
 make render C=acme FROM=now-30d      # one client, last 30 days
 ```
 
-Writes PNGs to `renders/<client>/<date>/`. The panels are listed in
-`config/render/panels.json`. The image renderer is a headless Chromium, so it
-is not part of the stack: `make render` starts it for the run (1 GB memory
-cap, one image at a time) and removes it afterwards. Between runs it costs
-nothing, and Grafana's own "Share → Render image" returns an error.
+Images are saved in `renders/<client>/<date>/`. To change which panels are
+exported, edit `config/render/panels.json`.
 
-Grafana and the renderer share `RENDERER_TOKEN` from the environment. Grafana
-refuses to start without it.
+## How clients are kept apart
 
-## How clients are kept separate
+This matters, because it is what you promise your clients.
 
-This is the part worth understanding, because it is what you are promising them.
+Every client gets their own **Grafana Organization** (Org). A user in one Org
+cannot see anything in another Org. Within each Org:
 
-Grafana **Organizations** are the boundary. Data source permissions are a
-Grafana Enterprise feature; in the open-source edition a Viewer can open
-Explore and query any data source in their Org. Teams and folder permissions do
-not stop that. Orgs do — a user in one Org cannot reach another Org's data
-sources at all.
+- **Metrics** pass through a filter (`prom-label-proxy`) that only lets that
+  client's data through. A query that asks for another client's data is
+  rejected.
+- **Logs** are stored per client in Loki, and each Org can only read its own.
+- **Incoming data** is tagged with the client that belongs to the agent's
+  password, so one client's agent cannot write into another client's logs.
 
-Inside each client Org:
+**One limitation:** the client label on *metrics* comes from the agent's own
+settings, so an agent could claim to be a different client. That is fine as
+long as **you** install and manage the agents. If clients ever run their own,
+replace Prometheus with [Grafana Mimir](https://grafana.com/oss/mimir/).
+[docs/architecture.md](docs/architecture.md) has the details.
 
-- **Metrics** go through that client's own `prom-label-proxy`, which injects
-  `client="<id>"` into every PromQL query server-side. A hand-written query
-  naming another tenant is rejected, not silently filtered.
-- **Logs** use Loki's native multi-tenancy. The data source sends
-  `X-Scope-OrgID: <id>`; Loki will not return another tenant's streams.
-- On the write path, the ingest gateway sets `X-Scope-OrgID` from the
-  *authenticated username*, so an agent cannot write into someone else's logs
-  regardless of what it sends.
-
-Verify it any time:
-
-```bash
-make check-tenancy
-```
-
-It queries each client's data sources, tries to reach every other tenant by
-name and with the filter stripped, and fails loudly if anything leaks.
-
-### One honest caveat
-
-Prometheus `remote_write` has no tenant header. The `client` label is applied
-by the agent's own config, so an agent could in principle claim to be a
-different client. That is acceptable here because **you install and control
-the agents**. If clients ever run their own, swap Prometheus for
-[Grafana Mimir](https://grafana.com/oss/mimir/), which enforces `X-Scope-OrgID`
-on ingest exactly as Loki does; the rest of the stack is unchanged.
-
-## Layout
+## Repository layout
 
 ```
-clients.yml                  source of truth — everything else is derived
-docker-compose.yml           the central stack, as Dokploy runs it (no ports)
-docker-compose.dev.yml       the same stack for local work (ports on 127.0.0.1)
-docker-compose.clients.yml   GENERATED — one label proxy per client
+clients.yml                  your clients: edit this, everything else follows
+docker-compose.yml           the stack as Dokploy runs it
+docker-compose.dev.yml       the same stack for your own computer
+docker-compose.clients.yml   generated: one metrics filter per client
 agent/                       what runs on each monitored server
-config/
-  prometheus/rules/          31 alert rules across host, container, uptime, meta
-  alertmanager/              routing template + HTML email templates
-  grafana/dashboards/        4 dashboards, used by every Org
-  ingest/                    the authenticating gateway
-  render/panels.json         which panels `make render` exports
-scripts/
-  generate.py                clients.yml → all per-client config
-  bootstrap_grafana.py       Orgs, logins, data sources, dashboards
-  render.py                  panels → PNG, driven by `make render`
-  check-tenancy.sh           proves the isolation actually holds
-  validate.sh                checks every config file
+config/                      Prometheus, Alertmanager, Loki, Grafana and ingest settings
+generated/                   generated: Grafana setup and onboarding notes
+scripts/                     generator, Grafana setup, checks
 docs/                        architecture, onboarding, alert runbook
 ```
 
-Files marked GENERATED are rebuilt by `make generate` and committed. Edit
-`clients.yml`, never the generated output.
+Generated files are committed to git, but never edit them by hand. Change
+`clients.yml` and run `make generate`.
 
-## Day-to-day
+## License
 
-```bash
-make help            # every command
-make validate        # before every commit
-make logs S=loki     # follow one service
-make reload          # apply config changes without restarting Prometheus
-make routes C=acme   # show where an alert for acme would be delivered
-make check-tenancy   # re-prove client isolation
-```
-
-When an alert fires, [docs/alert-runbook.md](docs/alert-runbook.md) has an
-entry per alert: what it means, what to check, and what usually causes it.
+[MIT](LICENSE)
