@@ -1,7 +1,7 @@
 {
   "uid": "em-logs",
   "title": "Logs",
-  "description": "Container and system logs from every monitored host, searchable and correlated with the metrics dashboards.",
+  "description": "Container and system logs from every monitored host: where the errors come from, and the lines themselves, newest first.",
   "tags": [
     "grafana-prometheus-loki"
   ],
@@ -10,18 +10,18 @@
   "graphTooltip": 1,
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "30s",
+  "refresh": "",
   "time": {
     "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
     "refresh_intervals": [
+      "10s",
       "30s",
       "1m",
       "5m",
-      "15m",
-      "1h"
+      "15m"
     ]
   },
   "templating": {
@@ -29,7 +29,7 @@
       {
         "name": "client",
         "label": "Client",
-        "description": "",
+        "description": "Your Org only ever shows your own environment.",
         "type": "query",
         "datasource": {
           "type": "loki",
@@ -41,7 +41,7 @@
           "stream": "",
           "refId": "LokiVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "sort": 1,
         "multi": false,
         "includeAll": false,
@@ -64,7 +64,7 @@
           "stream": "{client=\"$client\"}",
           "refId": "LokiVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "sort": 1,
         "multi": true,
         "includeAll": true,
@@ -75,8 +75,8 @@
       },
       {
         "name": "container",
-        "label": "Source",
-        "description": "Docker container name, or blank for system logs.",
+        "label": "Container",
+        "description": "Docker containers. Leave on All to include system logs too; picking containers shows only those.",
         "type": "query",
         "datasource": {
           "type": "loki",
@@ -88,7 +88,7 @@
           "stream": "{client=\"$client\", instance=~\"$instance\"}",
           "refId": "LokiVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "sort": 1,
         "multi": true,
         "includeAll": true,
@@ -98,26 +98,75 @@
         "allValue": ".*"
       },
       {
+        "name": "program",
+        "label": "Process",
+        "description": "System processes from the journal (sshd, sudo, systemd, ...). Leave on All to include containers too.",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "type": 1,
+          "label": "program",
+          "stream": "{client=\"$client\", instance=~\"$instance\"}",
+          "refId": "LokiVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "options": [],
+        "hide": 0,
+        "allValue": ".*"
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "description": "Which log levels to show in the log panel.",
+        "type": "custom",
+        "query": "Errors : error|crit|critical|fatal|alert|emerg|emergency|panic, Warnings : warn|warning, Info : info|notice, Debug : debug|trace, No level : unknown",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0
+      },
+      {
         "name": "search",
         "label": "Search",
-        "description": "Case-insensitive regex. Leave empty to show everything.",
+        "description": "Case-insensitive; regular expressions work.",
         "type": "textbox",
         "query": "",
         "current": {
           "text": "",
           "value": ""
         },
-        "hide": 0,
-        "options": []
+        "options": [],
+        "hide": 0
       }
     ]
   },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "Lines per second",
-      "description": "Matching the current filter.",
+      "title": "Log lines",
+      "description": "Every line from the selected hosts and sources in the time range.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -134,13 +183,16 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(rate({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)$search\" [$__interval]))",
-          "refId": "A"
+          "expr": "sum(count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} [$__range]))",
+          "refId": "A",
+          "queryType": "instant"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -162,7 +214,7 @@
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto",
         "orientation": "auto"
@@ -171,8 +223,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Errors per second",
-      "description": "Lines matching error/exception/fatal/panic/critical.",
+      "title": "Errors",
+      "description": "Lines logged at error level or worse (error, critical, fatal, alert, emergency, panic). The level is detected from the line itself, so '0 errors found' does not count.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -189,23 +241,22 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(rate({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)(error|exception|fatal|panic|critical|traceback|segfault)\" [$__interval]))",
-          "refId": "A"
+          "expr": "sum(count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(error|crit|critical|fatal|alert|emerg|emergency|panic)\" [$__range]))",
+          "refId": "A",
+          "queryType": "instant"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.1
               },
               {
                 "color": "red",
@@ -224,8 +275,8 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "area",
+        "colorMode": "value",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto",
         "orientation": "auto"
@@ -234,8 +285,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Errors (1h)",
-      "description": "",
+      "title": "Warnings",
+      "description": "Lines logged at warning level.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -252,13 +303,16 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)(error|exception|fatal|panic|critical|traceback|segfault)\" [1h]))",
-          "refId": "A"
+          "expr": "sum(count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(warn|warning)\" [$__range]))",
+          "refId": "A",
+          "queryType": "instant"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -268,11 +322,7 @@
               },
               {
                 "color": "orange",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 100
+                "value": 1
               }
             ]
           }
@@ -287,8 +337,8 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "area",
+        "colorMode": "value",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto",
         "orientation": "auto"
@@ -297,8 +347,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Sources reporting",
-      "description": "Distinct containers and units shipping logs right now.",
+      "title": "Sources with errors",
+      "description": "Containers and processes that logged at least one error in the time range. The table below lists them.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -315,19 +365,26 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "count(count by (container) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} [5m])))",
-          "refId": "A"
+          "expr": "count(sum by (instance, container, program) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(error|crit|critical|fatal|alert|emerg|emergency|panic)\" [$__range])))",
+          "refId": "A",
+          "queryType": "instant"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
               }
             ]
           }
@@ -343,7 +400,7 @@
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto",
         "orientation": "auto"
@@ -351,145 +408,31 @@
     },
     {
       "id": 5,
-      "type": "timeseries",
-      "title": "Log volume by source",
-      "description": "",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "expr": "sum by (container) (rate({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)$search\" [$__interval]))",
-          "refId": "A",
-          "legendFormat": "{{container}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 25,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "normal",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Errors by source",
-      "description": "A spike here is usually the first visible sign of an incident.",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 4,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "expr": "sum by (container) (rate({client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)(error|exception|fatal|panic|critical|traceback|segfault)\" [$__interval]))",
-          "refId": "A",
-          "legendFormat": "{{container}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 25,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "normal",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 7,
       "type": "row",
-      "title": "Log stream",
+      "title": "Where the errors come from",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 4,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 8,
-      "type": "logs",
-      "title": "Logs",
-      "description": "Filter with the Search box above \u2014 it is a case-insensitive regular expression.",
+      "id": 6,
+      "type": "table",
+      "title": "Errors and warnings by source",
+      "description": "Every container and process that logged an error or warning in the time range, worst first. Click a row's error count to show only that source's logs below.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "x": 0,
-        "y": 13,
-        "w": 24,
-        "h": 18
+        "y": 5,
+        "w": 14,
+        "h": 11
       },
       "targets": [
         {
@@ -497,8 +440,265 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{client=\"$client\", instance=~\"$instance\", container=~\"$container\"} |~ \"(?i)$search\"",
-          "refId": "A"
+          "expr": "sum by (instance, container, program) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(error|crit|critical|fatal|alert|emerg|emergency|panic)\" [$__range]))",
+          "refId": "A",
+          "queryType": "instant"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (instance, container, program) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(warn|warning)\" [$__range]))",
+          "refId": "B",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "instance": 0,
+              "container": 1,
+              "program": 2,
+              "Value #A": 3,
+              "Value #B": 4
+            },
+            "renameByName": {
+              "instance": "Host",
+              "container": "Container",
+              "program": "Process",
+              "Value #A": "Errors",
+              "Value #B": "Warnings"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Errors",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "0"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show this source's logs",
+                    "url": "/d/em-logs/logs?${__url_time_range}&var-client=${client}&var-instance=${__data.fields.Host}&var-container=${__data.fields.Container}&var-program=${__data.fields.Process}&var-level=All&var-search="
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Warnings"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "0"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Errors",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Errors over time",
+      "description": "Error lines per interval, by source. A source that suddenly appears here is usually the one to look at.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 5,
+        "w": 10,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (container, program) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(error|crit|critical|fatal|alert|emerg|emergency|panic)\" [$__interval]))",
+          "refId": "A",
+          "queryType": "range",
+          "legendFormat": "{{container}}{{program}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Logs",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Logs",
+      "description": "Newest first. Narrow it with Host, Container, Process, Level and Search at the top, or by clicking a row in the table above. Scroll down to load older lines.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} | detected_level=~\"(?i)(${level:pipe})\" |~ \"(?i)$search\"",
+          "refId": "A",
+          "queryType": "range"
         }
       ],
       "options": {
@@ -509,12 +709,67 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "dedupStrategy": "none",
-        "sortOrder": "Descending"
+        "sortOrder": "Descending",
+        "enableInfiniteScrolling": true,
+        "showControls": true,
+        "syntaxHighlighting": true
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Log volume",
+      "description": "All lines per interval, by source. Useful for spotting a container that has started logging in a loop.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (container, program) (count_over_time({client=\"$client\", instance=~\"$instance\", container=~\"$container\", program=~\"$program\"} |~ \"(?i)$search\" [$__interval]))",
+          "refId": "A",
+          "queryType": "range",
+          "legendFormat": "{{container}}{{program}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     }
-  ],
-  "annotations": {
-    "list": []
-  },
-  "links": []
+  ]
 }
