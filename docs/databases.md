@@ -5,21 +5,27 @@ The agent can watch the databases on the host it runs on: PostgreSQL
 Server. You give it a connection URL and it does the rest. Like everything
 else, it only connects outbound, so there is nothing to open on a firewall.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
-  | sudo bash -s -- --db app=postgres://monitor:<password>@app-db:5432/app
+Each database is one variable in the agent's environment:
+
+```
+DB_APP=postgres://monitor:<password>@app-db:5432/app
+DB_CACHE=redis://:<password>@cache:6379
 ```
 
-On a host that already runs the agent, that is the whole command: the client,
-ingest URL and password are remembered from the first install. On a new host,
-add `--db` to the usual install command. Repeat `--db` for several databases.
+Set them in Dokploy's Environment tab, or in the agent's `.env`, and
+redeploy. With the helper script it is one flag per database, and it adds
+the variable for you:
 
-The installer checks every connection before it finishes:
+```bash
+sudo agent/install.sh --db app=postgres://monitor:<password>@app-db:5432/app
+```
+
+The installer also checks every connection before it finishes:
 
 ```
 ==> checking database connections
-  ok      app (postgres)
-  FAILING cache (redis): WRONGPASS invalid username-password pair or user is disabled
+  ok      app
+  FAILING cache: WRONGPASS invalid username-password pair or user is disabled
 ```
 
 ## What you get
@@ -46,32 +52,35 @@ The engine follows from the scheme:
 | MongoDB | `mongodb://monitor:pw@host:27017/admin` |
 | SQL Server | `sqlserver://monitor:pw@host:1433` or `mssql://…` |
 
-- **Name.** `--db app=postgres://…` names the connection `app`. That name is
-  what dashboards and alerts show. Without it, the host name is used. Re-using
-  a name replaces that connection.
+- **Name.** `DB_APP` names the connection `app`, and `DB_MY_SHOP` names it
+  `my-shop`. That name is what dashboards and alerts show. With the
+  installer, `--db app=…` does the same; without a name it uses the host.
 - **Password characters.** A URL reserves some characters. Percent-encode
   them in the password: `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`,
   `%` → `%25`, `!` → `%21`.
-- **Postgres SSL.** For a database on the same host the installer adds
-  `sslmode=disable` unless the URL sets it. A remote one keeps the Postgres
-  default, `require`.
+- **Postgres SSL.** For a database on the same host (`localhost`, or a
+  container name without dots) the agent adds `sslmode=disable` unless the URL
+  sets it. A remote one keeps the Postgres default, `require`.
 - **MongoDB.** The path is the database the user was created in
-  (`/admin` below). Replica sets: give each member its own `--db` on the host
-  it runs on. The agent monitors one server, not a cluster, and `mongodb+srv://`
+  (`/admin` below). Replica sets: give each member its own variable on the
+  host it runs on. The agent monitors one server, not a cluster, and `mongodb+srv://`
   is not supported.
 
 ## Where the database runs
 
 **In a Docker container on this host (the usual case on Dokploy).** Use the
 container's name, or its Compose service name, as the host:
-`postgres://monitor:pw@shop-db:5432/shop`. The installer finds the Docker
-network the container is on and joins the agent to it (written to
-`/opt/grafana-prometheus-loki-agent/docker-compose.override.yml`). Databases created from
-Dokploy's *Databases* page are Swarm services on `dokploy-network`, and are
-found by their service name in the same way.
+`postgres://monitor:pw@shop-db:5432/shop`. The agent must share a Docker
+network with it. Databases created from Dokploy's *Databases* page are on
+`dokploy-network`. `docker inspect <container>` lists a container's networks.
 
-If the detection cannot find it, name the network yourself:
-`--db-network <network>`. `docker inspect <container>` lists its networks.
+- **With the installer** this is automatic: it finds the network of each
+  database host and joins the agent to it. If it cannot find one, name it:
+  `--db-network <network>`.
+- **Without it,** set `AGENT_DB_NETWORK` to the network's name, for example
+  `AGENT_DB_NETWORK=dokploy-network`, next to the `DB_` variables. One
+  network; databases spread over several are what the installer is for.
+
 A container that is only on Docker's default `bridge` network cannot be
 reached by name. Put it on a user-defined network, or publish its port and
 use the next option.
@@ -131,26 +140,32 @@ GRANT VIEW ANY DEFINITION TO monitor;
 
 ## Changing and removing
 
-```bash
-# new password: same name, new URL
-curl -fsSL …/agent/install.sh | sudo bash -s -- --db app=postgres://monitor:<new>@app-db:5432/app
+Change or delete the `DB_` variable and redeploy. With the installer:
 
-# stop monitoring it
-curl -fsSL …/agent/install.sh | sudo bash -s -- --remove-db app
+```bash
+sudo agent/install.sh --db app=postgres://monitor:<new>@app-db:5432/app   # new password
+sudo agent/install.sh --remove-db app                                     # stop monitoring
 ```
 
-Every run keeps the other connections and restarts the agent.
+Upgrading from an installer version that kept URLs in `db-connections/`: the
+first run moves them into `DB_` variables and deletes those files. A database
+whose name had an underscore (`app_db`) is then called `app-db`, and its
+dashboard history continues under the new name.
+
+A variable the agent cannot use (a typo in the scheme, a missing user) is
+skipped with an error in the agent's log, `docker logs grafana-prometheus-loki-agent`.
+The rest of the agent keeps running.
 
 ## How it works
 
 For whoever maintains this repo:
 
-- `agent/databases.alloy` defines one Alloy component per engine. The
-  installer writes `connections.alloy` on the host, with one block per
-  database. The URLs themselves live in `/opt/grafana-prometheus-loki-agent/db-connections/`
-  and are converted into what each exporter expects in `db-secrets/`. Both
-  directories are root-only, and Alloy reads the files as secrets, so
-  credentials never appear in the agent's config, UI or logs.
+- `agent/databases.alloy` defines one Alloy component per engine. At every
+  start, `agent/entrypoint.sh` turns each `DB_` variable into a block in
+  `connections.alloy` and a credentials file, in the form that engine's
+  exporter expects, inside the container. Alloy reads the files as secrets, so
+  credentials never appear in the agent's config, UI or logs. The same script
+  run as `entrypoint.sh check` is what the installer validates URLs with.
 - Each engine keeps an allowlist of the metrics that are actually used:
   roughly 15 to 100 series per database, where the exporters produce up to
   4,500. A metric must be on the allowlist before a rule or panel can use it;

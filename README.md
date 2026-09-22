@@ -47,8 +47,9 @@ The security alerts read each server's system logs, and the **Security**
 dashboard shows the logins, `sudo` use and account changes behind them. They
 detect and warn; they do not block anything.
 
-To block attackers automatically, turn on CrowdSec on a server by adding
-`--crowdsec` to the agent install command. It bans attackers in that server's
+To block attackers automatically, turn on CrowdSec on a server with
+`COMPOSE_PROFILES=crowdsec` in the agent's environment (or `--crowdsec` with
+the install script). It bans attackers in that server's
 firewall, including ports Docker publishes, and comes with its own dashboard
 and alerts. See [docs/crowdsec.md](docs/crowdsec.md).
 
@@ -140,18 +141,33 @@ at `https://monitor.example.com` as `admin`.
 
 ### 5. Install the agent on the monitoring server
 
-Use the `self` password from `INGEST_USERS`:
+The agent is `agent/docker-compose.yml`, configured by environment variables
+alone, so you can deploy it like any compose app: in Dokploy, with compose
+path `agent/docker-compose.yml` and these in the Environment tab (use the
+`self` password from `INGEST_USERS`):
+
+```
+CLIENT_ID=self
+HOST_NAME=monitor
+INGEST_URL=https://ingest.example.com
+INGEST_PASSWORD=<password>
+```
+
+Or let the helper script write that for you, find the right settings for the
+server and check the result:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
   | sudo bash -s -- --client self --ingest https://ingest.example.com --password '<password>'
 ```
 
-Within a minute, the **Host Overview** dashboard shows the server. Running the
-same command again later upgrades the agent.
+Within a minute, the **Host Overview** dashboard shows the server. Changing a
+variable and redeploying (or running the script again with just the setting
+that changes) is how you change anything later. Every variable is listed in
+[docs/agent.md](docs/agent.md).
 
 The agent is light: measured on a server running 21 containers, it used about
-5% of one CPU core, 260 MiB of memory and 230 MB a day of upload, plus whatever
+5% of one CPU core, 180 MiB of memory and 90 MB a day of upload, plus whatever
 its logs add. It only sends the metrics the alerts and dashboards use. CrowdSec,
 if you turn it on, adds about 110 MiB.
 
@@ -200,18 +216,16 @@ For more detail, including how to remove a client, see
 
 ## Monitoring databases
 
-To watch a database, add its connection URL when you install the agent on the
-server where it runs. On a server that already has the agent, this is the
-whole command:
+To watch a database, give the agent on the server where it runs one variable
+per database:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
-  | sudo bash -s -- --db app=postgres://monitor:<password>@app-db:5432/app
+```
+DB_APP=postgres://monitor:<password>@app-db:5432/app
 ```
 
-The host can be a container name; the agent joins its Docker network. The
-installer tests each connection before it finishes, and the password stays on
-that server. Nothing changes in `clients.yml`. Supported databases, how to
+With the helper script that is `--db app=postgres://…`, and it also joins the
+agent to the database's Docker network and tests the connection before it
+finishes. The password stays on that server. Nothing changes in `clients.yml`. Supported databases, how to
 create a read-only monitoring user, and the details:
 [docs/databases.md](docs/databases.md).
 
@@ -295,7 +309,7 @@ config/                      Prometheus, Alertmanager, Loki, Grafana and ingest 
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: input for the Grafana setup
 scripts/                     generator, Grafana setup, checks
-docs/                        architecture, onboarding, databases, CrowdSec, alert runbook
+docs/                        agent, architecture, onboarding, databases, CrowdSec, alert runbook
 ```
 
 Generated files are committed to git, but never edit them by hand. Change

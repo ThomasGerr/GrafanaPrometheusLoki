@@ -1,18 +1,36 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # grafana-prometheus-loki agent — runs on each monitored host.
 #
-# Installed to /opt/grafana-prometheus-loki-agent by install.sh. One container; it
-# opens no inbound ports and only ever connects outbound to the ingest URL.
+# Configured entirely through environment variables, from .env next to this
+# file (or the Environment tab when Dokploy deploys it):
 #
-# Optional: CrowdSec, which detects attacks in the same logs and blocks the
-# attackers in the host's firewall. Its two services are in the `crowdsec`
-# profile, so they exist only when install.sh --crowdsec has put
-# COMPOSE_PROFILES=crowdsec in .env. See docs/crowdsec.md.
+#   CLIENT_ID, HOST_NAME, INGEST_URL, INGEST_PASSWORD     required
+#   JOURNAL_DIR          where the host keeps its journal (/var/log/journal)
+#   DB_<NAME>=<url>      a database to monitor; see docs/databases.md
+#   AGENT_DB_NETWORK     the Docker network those databases are on, e.g.
+#                        dokploy-network
+#   COMPOSE_PROFILES=crowdsec, CROWDSEC_*                 optional CrowdSec;
+#                        see docs/crowdsec.md
+#
+# The agent generates its database and CrowdSec config from these at every
+# start, so changing a variable and redeploying is all a change takes.
+# install.sh is an optional helper that writes this .env for you, detects
+# the journal and database networks, and checks the result.
+#
+# The agent opens no inbound ports and only ever connects outbound to the
+# ingest URL. CrowdSec's local API listens on the host's loopback only.
 # ─────────────────────────────────────────────────────────────────────────────
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   alloy:
-    image: grafana/alloy:v1.19.0
+    build: .
+    image: grafana-prometheus-loki/agent
     container_name: grafana-prometheus-loki-agent
     restart: unless-stopped
 
@@ -31,29 +49,29 @@ services:
       # A directory: Alloy loads every .alloy file in it as one config.
       - /etc/alloy
 
+    # DB_* variables have names Compose cannot know in advance, so the whole
+    # .env is passed through. Optional, for when Dokploy supplies the
+    # variables some other way.
+    env_file:
+      - path: .env
+        required: false
     environment:
       CLIENT_ID: ${CLIENT_ID:?CLIENT_ID is required}
       HOST_NAME: ${HOST_NAME:?HOST_NAME is required}
       INGEST_URL: ${INGEST_URL:?INGEST_URL is required}
       INGEST_PASSWORD: ${INGEST_PASSWORD:?INGEST_PASSWORD is required}
+      # Tells the start-up script whether to collect CrowdSec's metrics.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
 
-    # Databases on this host that listen on its own loopback are reached
-    # through the Docker gateway. Harmless when there are none.
+    # Databases that listen on the host's own loopback are reached through
+    # the Docker gateway. Databases in other containers are reached by
+    # joining their network: AGENT_DB_NETWORK (see `networks:` at the bottom),
+    # or several, which install.sh adds in docker-compose.override.yml.
     extra_hosts:
       - host.docker.internal:host-gateway
+    networks: [default, agent-db, databases]
 
     volumes:
-      - ./config.alloy:/etc/alloy/config.alloy:ro
-      # Database monitoring: the per-engine components, the connections
-      # install.sh wrote for this host, and their credentials (root-only).
-      # Databases running in other containers are reached by joining their
-      # networks, which install.sh adds in docker-compose.override.yml.
-      - ./databases.alloy:/etc/alloy/databases.alloy:ro
-      - ./connections.alloy:/etc/alloy/connections.alloy:ro
-      # Collects CrowdSec's metrics when it is enabled (connections.alloy
-      # then instantiates it); inert otherwise.
-      - ./crowdsec.alloy:/etc/alloy/crowdsec.alloy:ro
-      - ./db-secrets:/etc/alloy-secrets:ro
       # Write-ahead log. Metrics survive a central outage and replay on
       # reconnect, so a maintenance window leaves no gap in the graphs.
       - alloy-data:/var/lib/alloy/data
@@ -64,23 +82,24 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
-      # System logs. install.sh sets JOURNAL_DIR to wherever this host keeps
-      # its journal; the default covers installs from before it did.
+      # System logs, wherever this host keeps its journal: /var/log/journal
+      # when stored on disk, /run/log/journal when only in memory.
       - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
 
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
-  # ── CrowdSec (optional, `crowdsec` profile) ──────────────────────────────
+  # ── CrowdSec (optional, `crowdsec` profile) ────────────────────────────────
+  # Exists only when COMPOSE_PROFILES=crowdsec. See docs/crowdsec.md.
+  #
   # The detection engine. Reads the host's journal (sshd) and container logs
-  # (Traefik, nginx), and decides whom to ban. The Debian image because the
-  # journal source runs journalctl, which the Alpine images do not have.
+  # (Traefik, nginx), and decides whom to ban. crowdsec/engine-start.sh
+  # applies the CROWDSEC_* settings at every start.
   crowdsec:
-    image: crowdsecurity/crowdsec:v1.8.1-debian
+    build:
+      context: ./crowdsec
+      dockerfile: engine.Dockerfile
+    image: grafana-prometheus-loki/crowdsec
     container_name: grafana-prometheus-loki-crowdsec
     profiles: [crowdsec]
     restart: unless-stopped
@@ -88,16 +107,17 @@ services:
       COLLECTIONS: >-
         crowdsecurity/linux crowdsecurity/sshd crowdsecurity/traefik
         crowdsecurity/nginx crowdsecurity/whitelist-good-actors
-      # Registers the firewall bouncer below under this key.
+      # The image registers a bouncer for every BOUNCER_KEY_<name> variable,
+      # so this is the bouncer "firewall" below. (Any variable containing
+      # BOUNCER_KEY counts, hence not CROWDSEC_BOUNCER_KEY here.) Required
+      # with CrowdSec, but checked by engine-start.sh rather than with :?:
+      # Compose checks :? even when the profile is off.
       BOUNCER_KEY_firewall: ${CROWDSEC_BOUNCER_KEY:-}
-      # No ENROLL_KEY here on purpose: the image enrolls at every start and
-      # exits if that fails, so one mistyped key would crash-loop CrowdSec
-      # and leave the host unprotected. install.sh enrolls once instead,
-      # after CrowdSec is up, and only warns when it fails.
+      CROWDSEC_WHITELIST: ${CROWDSEC_WHITELIST:-}
+      CROWDSEC_ENROLL_KEY: ${CROWDSEC_ENROLL_KEY:-}
+      HOST_NAME: ${HOST_NAME:-}
+      CLIENT_ID: ${CLIENT_ID:-}
     volumes:
-      # Written by install.sh: which logs to read. Whom never to ban is an
-      # allowlist in its database, which install.sh keeps in sync.
-      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
       # Its database of decisions, and the hub items and credentials it
       # downloads on first start.
       - crowdsec-data:/var/lib/crowdsec/data
@@ -105,31 +125,31 @@ services:
       - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Dokploy's Traefik writes its access log to a file, not stdout.
-      # install.sh points this at it, or at an empty directory.
+      # Dokploy's Traefik writes its access log to a file, not stdout. Set
+      # CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic on a Dokploy host.
       - ${CROWDSEC_TRAEFIK_DIR:-./crowdsec/no-traefik}:/var/log/traefik:ro
     ports:
       # The local API, for the bouncer, which runs in the host's network.
       # Loopback only.
       - "127.0.0.1:${CROWDSEC_LAPI_PORT:-8089}:8080"
     healthcheck:
-      test: ["CMD", "cscli", "lapi", "status"]
-      interval: 30s
+      # Healthy once the local API answers and the start-up step has
+      # registered the bouncer and applied the whitelist.
+      test: ["CMD-SHELL", "cscli lapi status >/dev/null 2>&1 && test -f /tmp/grafana-prometheus-loki-setup-done"]
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 30
       start_period: 60s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
   # The part that blocks. Pulls decisions from the engine every 10 seconds
   # and drops banned addresses in nftables, for the host and for Docker's
   # published ports alike. Needs the host's network and NET_ADMIN for that,
-  # and nothing else. Built here from CrowdSec's package: crowdsec/Dockerfile.
+  # and nothing else. Built from CrowdSec's package: crowdsec/bouncer.Dockerfile.
   crowdsec-firewall-bouncer:
-    build: ./crowdsec
+    build:
+      context: ./crowdsec
+      dockerfile: bouncer.Dockerfile
     image: grafana-prometheus-loki/crowdsec-firewall-bouncer
     container_name: grafana-prometheus-loki-crowdsec-bouncer
     profiles: [crowdsec]
@@ -142,13 +162,22 @@ services:
     depends_on:
       crowdsec:
         condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
 volumes:
   alloy-data:
   crowdsec-data:
   crowdsec-config:
+
+networks:
+  # AGENT_DB_NETWORK, joined as an existing network. Compose cannot make
+  # `external` depend on whether a variable is set, and the built-in bridge
+  # network cannot be joined this way, so when it is unset this points at
+  # agent-db: a small network of the agent's own that Compose creates first.
+  # Set on the network itself rather than in an override file, because
+  # Dokploy deploys with -f, which skips docker-compose.override.yml.
+  agent-db:
+    name: grafana-prometheus-loki-agent-db
+  databases:
+    name: ${AGENT_DB_NETWORK:-grafana-prometheus-loki-agent-db}
+    external: true

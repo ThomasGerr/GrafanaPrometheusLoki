@@ -2,6 +2,9 @@
 .env
 agent/.env
 
+# Per-host agent networks, written by install.sh or by hand
+agent/docker-compose.override.yml
+
 # Note: everything else under generated/ IS committed on purpose. The deployed
 # state is whatever is in git, and a diff shows exactly what a client change
 # did. `make validate` fails if those files are stale.

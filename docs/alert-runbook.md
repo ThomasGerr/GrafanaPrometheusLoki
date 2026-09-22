@@ -361,8 +361,9 @@ docker logs --tail 50 grafana-prometheus-loki-crowdsec
 ```
 
 It usually fails at start: the hub (where it downloads its parsers and
-scenarios) was unreachable, or the data volume was removed. Re-running the
-installer recreates it and reports what fails.
+scenarios) was unreachable, `CROWDSEC_BOUNCER_KEY` is not set (its log says
+so), or the data volume was removed. A redeploy, or re-running the installer,
+recreates it; the installer also reports what fails.
 
 ### CrowdSecBouncerNotBlocking
 
@@ -375,10 +376,10 @@ docker logs --tail 30 grafana-prometheus-loki-crowdsec-bouncer
 ```
 
 - `operation not permitted` from nftables: the container lost `NET_ADMIN`, or
-  the host kernel has no nftables support. Re-run the installer.
+  the host kernel has no nftables support. Redeploy the agent.
 - `403` or `access forbidden`: the bouncer's key no longer matches what
-  CrowdSec has registered, usually after CrowdSec's config volume was
-  deleted. Re-running the installer registers it again.
+  CrowdSec has registered. CrowdSec re-registers it at every start, so
+  `docker restart grafana-prometheus-loki-crowdsec` fixes it.
 - Restarting over and over: CrowdSec's local API is not answering. Look at
   **CrowdSecDown** first.
 
@@ -388,9 +389,9 @@ CrowdSec is running but has read no log lines from any source for two hours.
 An internet-facing host normally sees SSH probes and web scanners around the
 clock, so this means CrowdSec has lost its log sources.
 `docker exec grafana-prometheus-loki-crowdsec cscli metrics show acquisition` shows
-what each source has read. Common causes: the host's journal moved (re-run
-the installer, which detects it again), or Traefik or nginx was renamed so
-the container name no longer contains "traefik" or "nginx".
+what each source has read. Common causes: `JOURNAL_DIR` points at the wrong
+place (the installer detects it again when re-run), or Traefik or nginx was
+renamed so the container name no longer contains "traefik" or "nginx".
 
 A host that really is quiet, such as one only reachable over a VPN, can fire
 this without anything being wrong. Turn CrowdSec off there with
@@ -421,8 +422,9 @@ The agent logs the exporter's exact error, with the password redacted:
 ssh <host> 'docker logs --tail 200 grafana-prometheus-loki-agent 2>&1 | grep database_'
 ```
 
-`password authentication failed` or `Login failed` is case 2: update the
-connection with `--db <name>=<new url>`. `no such host` or `connection refused`
+`password authentication failed` or `Login failed` is case 2: update its
+`DB_<NAME>` variable and redeploy, or re-run the installer with
+`--db <name>=<new url>`. `no such host` or `connection refused`
 is case 3, or case 1 if the database container is not running
 (`docker ps -a`). If the application is healthy while this fires, the problem
 is the monitoring connection, not the database.

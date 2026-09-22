@@ -1,0 +1,5 @@
+*
+!config.alloy
+!databases.alloy
+!crowdsec.alloy
+!entrypoint.sh

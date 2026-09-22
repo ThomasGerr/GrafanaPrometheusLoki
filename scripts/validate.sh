@@ -6,7 +6,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PROM_IMAGE=prom/prometheus:v3.13.2
 AM_IMAGE=prom/alertmanager:v0.34.0
-ALLOY_IMAGE=grafana/alloy:v1.19.0
 LOKI_IMAGE=grafana/loki:3.7.6
 
 fails=0
@@ -99,30 +98,31 @@ docker rm -f "$net" >/dev/null 2>&1
 docker network rm "$net" >/dev/null 2>&1
 
 # ── Alloy agent ────────────────────────────────────────────────────────────
-# On a host the agent loads config.alloy, databases.alloy and the
-# connections.alloy that install.sh writes, as one directory. Validate them
-# the same way, with a connection of every engine, so a wrong argument in a
-# database component fails here rather than on a client's server.
+# The agent generates its database and CrowdSec config at start-up from
+# environment variables. Build its image and run that exact start-up with a
+# database of every engine and CrowdSec on, then have Alloy validate the
+# result, so a wrong argument anywhere fails here rather than on a server.
 step "Agent config"
-agent_dir=$(mktemp -d)
-cp agent/config.alloy agent/databases.alloy agent/crowdsec.alloy "$agent_dir/"
-{
-  for engine in postgres mysql redis mongodb mssql; do
-    printf 'database_%s "db_%s" {\n  name = "%s"\n' "$engine" "$engine" "$engine"
-    [ "$engine" = redis ] && printf '  address = "redis://redis:6379"\n'
-    printf '  secret_file = "/dev/null"\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
-  done
-  printf 'crowdsec_metrics "local" {\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
-} > "$agent_dir/connections.alloy"
-if out=$(docker run --rm -v "$agent_dir:/a:ro" \
+if ! out=$(docker build -q -t validate/agent agent 2>&1); then
+  bad "agent image build"; echo "$out" | tail -15 | sed 's/^/       /'
+elif out=$(docker run --rm \
           -e CLIENT_ID=validate -e HOST_NAME=validate \
           -e INGEST_URL=https://example.com -e INGEST_PASSWORD=x \
-          "$ALLOY_IMAGE" validate /a 2>&1); then
-  ok "agent/config.alloy + databases.alloy (all five engines) + crowdsec.alloy"
+          -e COMPOSE_PROFILES=crowdsec \
+          -e DB_PG=postgres://u:p@pg:5432/db -e DB_MY=mysql://u:p@my:3306 \
+          -e DB_RD=redis://:p@rd:6379 -e DB_MG=mongodb://u:p@mg:27017/admin \
+          -e DB_MS=sqlserver://u:p@ms:1433 \
+          validate/agent validate /etc/alloy 2>&1); then
+  ok "agent start-up + Alloy config (all five engines, CrowdSec)"
 else
   bad "agent config"; echo "$out" | sed 's/^/       /'
 fi
-rm -rf "$agent_dir"
+# And its validation must reject what it should.
+if docker run --rm -e DB_BAD=not-a-url validate/agent check >/dev/null 2>&1; then
+  bad "agent check mode accepted an invalid DB_ variable"
+else
+  ok "agent check mode rejects invalid DB_ variables"
+fi
 
 # ── Compose ────────────────────────────────────────────────────────────────
 step "Docker Compose"
@@ -154,11 +154,13 @@ else
   bad "production image build"; echo "$out" | grep -v "level=warning" | tail -15 | sed 's/^/       /'
 fi
 # Built on each monitored host where CrowdSec is on.
-if out=$(docker build -q agent/crowdsec 2>&1); then
-  ok "agent/crowdsec (firewall bouncer) builds"
-else
-  bad "agent/crowdsec build"; echo "$out" | tail -15 | sed 's/^/       /'
-fi
+for image in engine bouncer; do
+  if out=$(docker build -q -f "agent/crowdsec/$image.Dockerfile" agent/crowdsec 2>&1); then
+    ok "agent/crowdsec/$image.Dockerfile builds"
+  else
+    bad "agent/crowdsec/$image.Dockerfile"; echo "$out" | tail -15 | sed 's/^/       /'
+  fi
+done
 
 # ── Dashboards ─────────────────────────────────────────────────────────────
 step "Grafana dashboards"

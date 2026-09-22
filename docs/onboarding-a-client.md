@@ -76,29 +76,31 @@ config changed are restarted.
 
 ## 5. Install the agent on their servers
 
-On each host:
+On each host, either deploy `agent/docker-compose.yml` as a Dokploy compose
+app with these variables in its Environment tab:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
-  | sudo bash -s -- \
-      --client acme \
-      --ingest https://ingest.example.com \
-      --password '<the password from step 3>' \
-      --host acme-web-01
+```
+CLIENT_ID=acme
+HOST_NAME=acme-web-01
+INGEST_URL=https://ingest.example.com
+INGEST_PASSWORD=<the password from step 3>
 ```
 
-`--host` is optional and defaults to the machine's hostname. Set it when the
-hostname is not something you would want to read in an alert email at 2am —
-`acme-web-01` beats `ip-172-31-4-9`.
+or run the helper script from a checkout of this repository:
 
-The installer refuses to finish quietly if the credentials are wrong: it starts
-the agent, waits, and reports a rejected login rather than leaving you to find
-out tomorrow.
+```bash
+sudo agent/install.sh --client acme --ingest https://ingest.example.com \
+  --password '<the password from step 3>' --host acme-web-01
+```
 
-If the server runs databases, add a `--db` per database, now or later:
-`--db app=postgres://monitor:<password>@app-db:5432/app`. Create a read-only
-monitoring user first. [databases.md](databases.md) has the one-liner for
-each engine.
+Pick a host name you would want to read in an alert email at 2am:
+`acme-web-01` beats `ip-172-31-4-9`. The installer defaults to the machine's
+hostname, and refuses to finish quietly if the credentials are wrong.
+
+If the server runs databases, add a `DB_<NAME>=<url>` variable per database
+(`--db name=<url>` with the installer), now or later. Create a read-only
+monitoring user first; [databases.md](databases.md) has the one-liner for
+each engine. [agent.md](agent.md) lists every variable.
 
 Confirm the data arrived. Run this on the monitoring host — the stack
 publishes no ports, so the query goes through the container:
