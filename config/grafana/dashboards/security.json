@@ -86,7 +86,7 @@
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 6,
+        "w": 5,
         "h": 4
       },
       "targets": [
@@ -149,9 +149,9 @@
       "title": "Addresses trying to log in",
       "description": "Distinct IP addresses with failed SSH logins in the selected time range.",
       "gridPos": {
-        "x": 6,
+        "x": 5,
         "y": 0,
-        "w": 6,
+        "w": 5,
         "h": 4
       },
       "targets": [
@@ -210,13 +210,75 @@
       }
     },
     {
+      "id": 11,
+      "type": "stat",
+      "title": "Banned now",
+      "description": "Of the addresses that failed to log in over SSH in the time range, how many CrowdSec on that host has banned in the last 4 hours, so they are blocked right now. Empty on hosts without CrowdSec.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "refId": "A",
+          "queryType": "instant",
+          "expr": "count((sum by (instance, ip) (count_over_time({client=\"$client\", instance=~\"$instance\", job=\"systemd\", program=~\"sshd|sshd-session\"} |~ \"Failed (password|publickey)|Invalid user|Connection closed by (authenticating|invalid) user|maximum authentication attempts\" | regexp \"(?P<ip>[0-9]{1,3}(\\\\.[0-9]{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+) port\" [$__range]))) and on (instance, ip) (sum by (instance, ip) (count_over_time({client=\"$client\", instance=~\"$instance\", container=\"grafana-prometheus-loki-crowdsec\"} |= \" ban on Ip \" | regexp `by ip (?P<ip>[0-9a-fA-F.:]+) : \\S+ ban on` [4h]))))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
       "type": "stat",
       "title": "Successful SSH logins",
       "description": "Every successful SSH login in the selected time range. Each one should be someone you know.",
       "gridPos": {
-        "x": 12,
+        "x": 14,
         "y": 0,
-        "w": 6,
+        "w": 5,
         "h": 4
       },
       "targets": [
@@ -271,9 +333,9 @@
       "title": "Failed sudo attempts",
       "description": "Wrong sudo passwords, or accounts that are not allowed to use sudo.",
       "gridPos": {
-        "x": 18,
+        "x": 19,
         "y": 0,
-        "w": 6,
+        "w": 5,
         "h": 4
       },
       "targets": [
@@ -338,7 +400,7 @@
       "gridPos": {
         "x": 0,
         "y": 4,
-        "w": 14,
+        "w": 12,
         "h": 9
       },
       "targets": [
@@ -429,28 +491,53 @@
     {
       "type": "table",
       "title": "Top addresses with failed logins",
-      "description": "The IP addresses with the most failed SSH logins in the selected time range.",
+      "description": "The addresses with the most failed SSH logins in the time range, and whether CrowdSec on that host has banned them. Banned: a ban in the last 4 hours, CrowdSec's default ban length, so it is still in force. Expired: banned earlier in the range; the ban has run out, and a new attempt starts over. Empty: not banned, or CrowdSec is not turned on for that host.",
       "gridPos": {
-        "x": 14,
+        "x": 12,
         "y": 4,
-        "w": 10,
+        "w": 12,
         "h": 9
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (ip) (count_over_time({client=\"$client\", instance=~\"$instance\", job=\"systemd\", program=~\"sshd|sshd-session\"} |~ \"Failed (password|publickey)|Invalid user|Connection closed by (authenticating|invalid) user|maximum authentication attempts\" | regexp \"(?P<ip>[0-9]{1,3}(\\\\.[0-9]{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+) port\" [$__range])))",
-          "refId": "A",
-          "queryType": "instant",
           "datasource": {
             "type": "loki",
             "uid": "loki"
-          }
+          },
+          "refId": "A",
+          "queryType": "instant",
+          "expr": "topk(15, sum by (instance, ip) (count_over_time({client=\"$client\", instance=~\"$instance\", job=\"systemd\", program=~\"sshd|sshd-session\"} |~ \"Failed (password|publickey)|Invalid user|Connection closed by (authenticating|invalid) user|maximum authentication attempts\" | regexp \"(?P<ip>[0-9]{1,3}(\\\\.[0-9]{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+) port\" [$__range])))"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "refId": "B",
+          "queryType": "instant",
+          "expr": "(((sum by (instance, ip) (count_over_time({client=\"$client\", instance=~\"$instance\", container=\"grafana-prometheus-loki-crowdsec\"} |= \" ban on Ip \" | regexp `by ip (?P<ip>[0-9a-fA-F.:]+) : \\S+ ban on` [4h]))) > 0) * 0 + 2) or (((sum by (instance, ip) (count_over_time({client=\"$client\", instance=~\"$instance\", container=\"grafana-prometheus-loki-crowdsec\"} |= \" ban on Ip \" | regexp `by ip (?P<ip>[0-9a-fA-F.:]+) : \\S+ ban on` [$__range]))) > 0) * 0 + 1)"
         }
       ],
       "transformations": [
         {
-          "id": "labelsToFields",
+          "id": "merge",
           "options": {}
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "exclude",
+            "match": "any",
+            "filters": [
+              {
+                "fieldName": "Value #A",
+                "config": {
+                  "id": "isNull",
+                  "options": {}
+                }
+              }
+            ]
+          }
         },
         {
           "id": "organize",
@@ -458,10 +545,17 @@
             "excludeByName": {
               "Time": true
             },
+            "indexByName": {
+              "instance": 0,
+              "ip": 1,
+              "Value #A": 2,
+              "Value #B": 3
+            },
             "renameByName": {
+              "instance": "Host",
               "ip": "Address",
-              "Value": "Attempts",
-              "Value #A": "Attempts"
+              "Value #A": "Attempts",
+              "Value #B": "CrowdSec"
             }
           }
         },
@@ -483,7 +577,70 @@
             "align": "auto"
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CrowdSec"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "2": {
+                        "text": "Banned",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Expired",
+                        "color": "orange",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "noValue",
+                "value": "–"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "transparent"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Attempts"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
