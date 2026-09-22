@@ -11,6 +11,9 @@
 #                        dokploy-network
 #   COMPOSE_PROFILES=crowdsec, CROWDSEC_*                 optional CrowdSec;
 #                        see docs/crowdsec.md
+#   COMPOSE_PROFILES=backup, RESTIC_*, BACKUP_*           optional backups
+#                        with restic; see docs/backups.md
+#                        (both: COMPOSE_PROFILES=crowdsec,backup)
 #
 # The agent generates its database and CrowdSec config from these at every
 # start, so changing a variable and redeploying is all a change takes.
@@ -86,6 +89,10 @@ services:
       # when stored on disk, /run/log/journal when only in memory.
       - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
+      # Results of the backup service's runs, read by the host collector's
+      # textfile reader. Writable only so start-up can clear them when
+      # backups are off.
+      - backup-metrics:/var/lib/node-textfile
 
     logging: *default-logging
 
@@ -167,10 +174,50 @@ services:
         condition: service_healthy
     logging: *default-logging
 
+  # ── Backups (optional, `backup` profile) ───────────────────────────────────
+  # Exists only when COMPOSE_PROFILES contains backup. See docs/backups.md.
+  #
+  # restic on BACKUP_SCHEDULE: host paths, Docker volumes, and a streamed
+  # dump of every database. Each run's result goes to backup-metrics, which
+  # the agent reports; alerts fire when a backup fails or gets too old.
+  backup:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    image: grafana-prometheus-loki/backup
+    container_name: grafana-prometheus-loki-backup
+    profiles: [backup]
+    restart: unless-stopped
+    # A fixed hostname, so restic recognises a lock left by a run that a
+    # redeploy interrupted as stale and clears it. With Docker's random one it
+    # would block retention and checks for 30 minutes.
+    hostname: grafana-prometheus-loki-backup
+    # RESTIC_* and the storage backend's own variables (AWS_*, B2_*, ...),
+    # BACKUP_* and DB_* / BACKUP_DB_*: too many to list, so all of .env.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST_NAME: ${HOST_NAME:-}
+    volumes:
+      # The host, read-only: what gets backed up. Snapshot paths start with
+      # /rootfs, so /rootfs/etc is the host's /etc.
+      - /:/rootfs:ro
+      - backup-metrics:/metrics
+      # restic's local cache of the repository's index; makes runs faster.
+      - backup-cache:/root/.cache/restic
+    # Reaches the databases the same way the agent does.
+    networks: [default, agent-db, databases]
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    logging: *default-logging
+
 volumes:
   alloy-data:
   crowdsec-data:
   crowdsec-config:
+  backup-metrics:
+  backup-cache:
 
 networks:
   # AGENT_DB_NETWORK, joined as an existing network. Compose cannot make

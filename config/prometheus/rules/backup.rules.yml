@@ -1,0 +1,66 @@
+groups:
+  # Backups with restic, on hosts where the agent's `backup` profile is on.
+  # The backup container writes each run's results to a metrics file that the
+  # agent's host collector reports (agent/backup/backup.sh). Hosts without
+  # backups have no restic_* series, so none of these can fire there.
+  - name: backups
+    rules:
+      # The last run did not complete: a path, a dump, retention or the check
+      # failed. Clears when a run succeeds.
+      - alert: BackupFailed
+        expr: restic_backup_success == 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The last backup of {{ $labels.instance }} failed"
+          description: >-
+            The most recent restic run on {{ $labels.instance }} did not
+            complete. Earlier snapshots are still there; the backup container's
+            log says what failed.
+          runbook: "docs/alert-runbook.md#backupfailed"
+
+      # No successful backup for longer than BACKUP_MAX_AGE_HOURS (default
+      # 26: a daily schedule plus some slack), which the backup container
+      # publishes itself. A host that never completed one counts from when
+      # backups were turned on.
+      - alert: BackupTooOld
+        expr: |
+          (
+            time() - (restic_backup_last_success_timestamp_seconds or restic_backup_enabled_since_timestamp_seconds)
+          ) > restic_backup_max_age_seconds
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup of {{ $labels.instance }} for {{ $value | humanizeDuration }}"
+          description: >-
+            If {{ $labels.instance }} were lost now, everything since its last
+            good backup would be lost with it.
+          runbook: "docs/alert-runbook.md#backuptooold"
+
+      # restic check found a problem with the repository itself: snapshots in
+      # it may not be restorable.
+      - alert: BackupRepositoryDamaged
+        expr: restic_check_success == 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The backup repository of {{ $labels.instance }} failed its integrity check"
+          description: >-
+            restic check reported errors. Until they are fixed, backups in
+            this repository may not restore.
+          runbook: "docs/alert-runbook.md#backuprepositorydamaged"
+
+      - alert: DatabaseDumpFailed
+        expr: restic_dump_success == 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The backup dump of database {{ $labels.db }} on {{ $labels.instance }} failed"
+          description: >-
+            The {{ $labels.engine }} dump of {{ $labels.db }} failed in the last
+            backup run, so there is no new backup of that database.
+          runbook: "docs/alert-runbook.md#databasedumpfailed"

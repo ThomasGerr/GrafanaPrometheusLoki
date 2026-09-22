@@ -34,6 +34,13 @@ DB_NETWORKS=()
 CROWDSEC_MODE=""              # on, off, or empty to keep what the host has
 CROWDSEC_ENROLL_ARG=""
 CROWDSEC_WHITELIST_ARGS=()
+BACKUP_MODE=""                # on, off, or empty to keep what the host has
+BACKUP_REPO_ARG=""
+BACKUP_PASSWORD_ARG=""
+BACKUP_PATHS_ARG=""
+BACKUP_VOLUMES_ARG=""
+BACKUP_SCHEDULE_ARG=""
+BACKUP_ENV_ARGS=()
 
 die() { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -44,6 +51,9 @@ Usage: install.sh [--client <id>] [--ingest <url>] [--password <password>] [--ho
                   [--db [name=]<url>]... [--remove-db <name>]... [--db-network <network>]...
                   [--crowdsec | --no-crowdsec] [--crowdsec-enroll-key <key>]
                   [--crowdsec-whitelist <ip or cidr,...>]
+                  [--backup | --no-backup] [--backup-repository <restic repo>]
+                  [--backup-password <password>] [--backup-paths <path,...>]
+                  [--backup-volumes] [--backup-schedule <cron>] [--backup-env KEY=VALUE]...
 
   --client    Client id, exactly as it appears in the central clients.yml
   --ingest    Ingest gateway URL, e.g. https://ingest.example.com
@@ -74,6 +84,19 @@ CrowdSec (detects attacks in this host's logs and blocks them in its firewall):
                           CIDRs. Added to earlier ones. The address you are
                           connected over SSH from is added automatically.
 
+Backups with restic (host paths, Docker volumes, a dump of every database):
+  --backup              Turn them on. Stays on for later runs until --no-backup.
+  --no-backup           Turn them off. The repository and its snapshots stay.
+  --backup-repository   Where they go, as restic expects it: s3:https://…/bucket,
+                        b2:bucket:path, sftp:user@host:/path, rest:https://…
+  --backup-password     The repository's password. Generated if there is none
+                        yet, and printed once: without it the backups are lost.
+  --backup-paths        Host directories to back up, comma-separated: /etc,/opt
+  --backup-volumes      Also back up every Docker volume.
+  --backup-schedule     When, as a cron line in UTC (default: 0 3 * * *).
+  --backup-env          A variable the storage needs, e.g. its credentials:
+                        --backup-env AWS_ACCESS_KEY_ID=… (repeatable)
+
 Settings not given keep their current value: from this host's install, or
 from an agent that was started with docker compose by hand, which this
 script then takes over.
@@ -95,6 +118,14 @@ while [[ $# -gt 0 ]]; do
     --no-crowdsec)         CROWDSEC_MODE=off; shift ;;
     --crowdsec-enroll-key) CROWDSEC_ENROLL_ARG="${2:-}"; CROWDSEC_MODE="${CROWDSEC_MODE:-on}"; shift 2 ;;
     --crowdsec-whitelist)  CROWDSEC_WHITELIST_ARGS+=("${2:-}"); shift 2 ;;
+    --backup)              BACKUP_MODE=on;  shift ;;
+    --no-backup)           BACKUP_MODE=off; shift ;;
+    --backup-repository)   BACKUP_REPO_ARG="${2:-}";     BACKUP_MODE="${BACKUP_MODE:-on}"; shift 2 ;;
+    --backup-password)     BACKUP_PASSWORD_ARG="${2:-}"; shift 2 ;;
+    --backup-paths)        BACKUP_PATHS_ARG="${2:-}";    shift 2 ;;
+    --backup-volumes)      BACKUP_VOLUMES_ARG=true;      shift ;;
+    --backup-schedule)     BACKUP_SCHEDULE_ARG="${2:-}"; shift 2 ;;
+    --backup-env)          BACKUP_ENV_ARGS+=("${2:-}");  shift 2 ;;
     -h|--help)    usage ;;
     *)            die "unknown option: $1" ;;
   esac
@@ -141,7 +172,7 @@ ADOPT_DIR=""
 if [[ ! -f "$ENV_FILE" ]] && docker inspect "$AGENT" >/dev/null 2>&1; then
   ADOPT_DIR="$(docker inspect "$AGENT" -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')"
   while IFS='=' read -r key value; do
-    [[ "$key" =~ ^(CLIENT_ID|HOST_NAME|INGEST_URL|INGEST_PASSWORD|JOURNAL_DIR|COMPOSE_PROFILES|CROWDSEC_[A-Z_]+|DB_[A-Za-z0-9_]+)$ ]] \
+    [[ "$key" =~ ^(CLIENT_ID|HOST_NAME|INGEST_URL|INGEST_PASSWORD|JOURNAL_DIR|AGENT_DB_NETWORK|COMPOSE_PROFILES|CROWDSEC_[A-Z_]+|RESTIC_[A-Z_]+|BACKUP_[A-Za-z0-9_]+|DB_[A-Za-z0-9_]+)$ ]] \
       && CUR["$key"]="$value"
   done < <(docker inspect "$AGENT" -f '{{range .Config.Env}}{{println .}}{{end}}')
   info "taking over the agent started from ${ADOPT_DIR:-an unknown directory}"
@@ -299,6 +330,38 @@ if [[ -n "$CROWDSEC_ON" ]]; then
     || CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic
 fi
 
+# ── Backup settings ─────────────────────────────────────────────────────────
+BACKUP_WAS_ON=""
+[[ ",${CUR[COMPOSE_PROFILES]:-}," == *,backup,* ]] && BACKUP_WAS_ON=1
+case "$BACKUP_MODE" in
+  on)  BACKUP_ON=1 ;;
+  off) BACKUP_ON="" ;;
+  *)   BACKUP_ON="$BACKUP_WAS_ON" ;;
+esac
+# Kept even while backups are off: the password above all, since without it
+# the existing snapshots cannot be read.
+RESTIC_REPOSITORY="${BACKUP_REPO_ARG:-${CUR[RESTIC_REPOSITORY]:-}}"
+RESTIC_PASSWORD="${BACKUP_PASSWORD_ARG:-${CUR[RESTIC_PASSWORD]:-}}"
+BACKUP_PATHS="${BACKUP_PATHS_ARG:-${CUR[BACKUP_PATHS]:-}}"
+BACKUP_DOCKER_VOLUMES="${BACKUP_VOLUMES_ARG:-${CUR[BACKUP_DOCKER_VOLUMES]:-}}"
+BACKUP_SCHEDULE="${BACKUP_SCHEDULE_ARG:-${CUR[BACKUP_SCHEDULE]:-}}"
+declare -A BACKUP_ENV=()
+for kv in "${BACKUP_ENV_ARGS[@]+"${BACKUP_ENV_ARGS[@]}"}"; do
+  [[ "$kv" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]] || die "--backup-env: expected KEY=VALUE, got '${kv%%=*}…'"
+  BACKUP_ENV["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+done
+GENERATED_BACKUP_PASSWORD=""
+if [[ -n "$BACKUP_ON" ]]; then
+  [[ -n "$RESTIC_REPOSITORY" ]] || die "backups need --backup-repository: where restic stores them (see docs/backups.md)"
+  if [[ -z "$RESTIC_PASSWORD" ]]; then
+    RESTIC_PASSWORD="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    GENERATED_BACKUP_PASSWORD=1
+  fi
+  for p in ${BACKUP_PATHS//,/ }; do
+    [[ "$p" == /* ]] || die "--backup-paths: '$p' is not an absolute path"
+  done
+fi
+
 info "client:  $CLIENT_ID"
 info "host:    $HOST_NAME"
 info "ingest:  $INGEST_URL"
@@ -327,8 +390,9 @@ fetch() {
   instead, or pass --raw-base pointing somewhere this host can read."
   fi
 }
-for f in docker-compose.yml Dockerfile .dockerignore entrypoint.sh \
+for f in docker-compose.yml Dockerfile .dockerignore entrypoint.sh lib/db-url.sh \
          config.alloy databases.alloy crowdsec.alloy \
+         backup/Dockerfile backup/backup.sh backup/backup-entrypoint.sh \
          crowdsec/engine.Dockerfile crowdsec/engine-start.sh crowdsec/bouncer.Dockerfile \
          crowdsec/firewall-bouncer.yaml crowdsec/.dockerignore; do
   fetch "$f"
@@ -394,10 +458,12 @@ if [[ ${#JOIN[@]} -gt 0 ]]; then
   {
     echo "# Written by install.sh: the networks the agent joins to reach databases."
     echo "services:"
-    echo "  alloy:"
-    echo "    networks:"
-    echo "      - default"
-    for net in "${JOIN[@]}"; do echo "      - \"$net\""; done
+    for svc in alloy backup; do
+      echo "  $svc:"
+      echo "    networks:"
+      echo "      - default"
+      for net in "${JOIN[@]}"; do echo "      - \"$net\""; done
+    done
     echo "networks:"
     for net in "${JOIN[@]}"; do printf '  "%s":\n    external: true\n' "$net"; done
   } > docker-compose.override.yml
@@ -407,7 +473,7 @@ fi
 
 # ── Write .env ──────────────────────────────────────────────────────────────
 # Lines this script does not manage (anything you added by hand) are kept.
-MANAGED='^(CLIENT_ID|HOST_NAME|INGEST_URL|INGEST_PASSWORD|JOURNAL_DIR|AGENT_NETWORKS|COMPOSE_PROFILES|CROWDSEC_[A-Z_]+|DB_[A-Za-z0-9_]+)='
+MANAGED='^(CLIENT_ID|HOST_NAME|INGEST_URL|INGEST_PASSWORD|JOURNAL_DIR|AGENT_NETWORKS|COMPOSE_PROFILES|CROWDSEC_[A-Z_]+|DB_[A-Za-z0-9_]+|RESTIC_REPOSITORY|RESTIC_PASSWORD|BACKUP_PATHS|BACKUP_DOCKER_VOLUMES|BACKUP_SCHEDULE)='
 umask 077
 {
   echo "# Agent settings. Written by install.sh; editing by hand works too (then"
@@ -419,13 +485,25 @@ umask 077
   env_line JOURNAL_DIR "$JOURNAL_DIR"
   [[ -z "$AGENT_NETWORKS" ]] || echo "AGENT_NETWORKS=$AGENT_NETWORKS"
   for key in $(printf '%s\n' "${!DBS[@]}" | sort); do env_line "$key" "${DBS[$key]}"; done
-  [[ -z "$CROWDSEC_ON" ]] || echo "COMPOSE_PROFILES=crowdsec"
+  profiles=()
+  [[ -z "$CROWDSEC_ON" ]] || profiles+=(crowdsec)
+  [[ -z "$BACKUP_ON" ]] || profiles+=(backup)
+  [[ ${#profiles[@]} -eq 0 ]] || echo "COMPOSE_PROFILES=$(IFS=,; echo "${profiles[*]}")"
+  [[ -z "$RESTIC_REPOSITORY" ]]     || env_line RESTIC_REPOSITORY "$RESTIC_REPOSITORY"
+  [[ -z "$RESTIC_PASSWORD" ]]       || env_line RESTIC_PASSWORD "$RESTIC_PASSWORD"
+  [[ -z "$BACKUP_PATHS" ]]          || env_line BACKUP_PATHS "$BACKUP_PATHS"
+  [[ -z "$BACKUP_DOCKER_VOLUMES" ]] || echo "BACKUP_DOCKER_VOLUMES=$BACKUP_DOCKER_VOLUMES"
+  [[ -z "$BACKUP_SCHEDULE" ]]       || env_line BACKUP_SCHEDULE "$BACKUP_SCHEDULE"
+  for key in $(printf '%s\n' "${!BACKUP_ENV[@]}" | sort); do env_line "$key" "${BACKUP_ENV[$key]}"; done
   [[ -z "$CROWDSEC_BOUNCER_KEY" ]] || echo "CROWDSEC_BOUNCER_KEY=$CROWDSEC_BOUNCER_KEY"
   [[ -z "$CROWDSEC_WHITELIST" ]]   || echo "CROWDSEC_WHITELIST=$CROWDSEC_WHITELIST"
   [[ -z "$CROWDSEC_ENROLL_KEY" ]]  || env_line CROWDSEC_ENROLL_KEY "$CROWDSEC_ENROLL_KEY"
   [[ -z "$CROWDSEC_LAPI_PORT" ]]   || echo "CROWDSEC_LAPI_PORT=$CROWDSEC_LAPI_PORT"
   [[ -z "$CROWDSEC_TRAEFIK_DIR" ]] || echo "CROWDSEC_TRAEFIK_DIR=$CROWDSEC_TRAEFIK_DIR"
-  [[ -f "$ENV_FILE" ]] && grep -vE "$MANAGED" "$ENV_FILE" | grep -vE '^# (Agent settings|run: docker)' || true
+  # Keys given with --backup-env replace their earlier value.
+  extra="^($(IFS='|'; echo "${!BACKUP_ENV[*]+"${!BACKUP_ENV[*]}"}"))="
+  [[ "$extra" != "^()=" ]] || extra='^$'
+  [[ -f "$ENV_FILE" ]] && grep -vE "$MANAGED" "$ENV_FILE" | grep -vE "$extra" | grep -vE '^# (Agent settings|run: docker)' || true
 } > "$ENV_FILE.new"
 mv "$ENV_FILE.new" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
@@ -438,7 +516,7 @@ STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # A hand-started agent holds the container name; make way for this one.
 if [[ -n "$ADOPT_DIR" && "$ADOPT_DIR" != "$INSTALL_DIR" ]]; then
-  docker rm -f "$AGENT" grafana-prometheus-loki-crowdsec grafana-prometheus-loki-crowdsec-bouncer >/dev/null 2>&1 || true
+  docker rm -f "$AGENT" grafana-prometheus-loki-crowdsec grafana-prometheus-loki-crowdsec-bouncer grafana-prometheus-loki-backup >/dev/null 2>&1 || true
   echo "note: the old agent in $ADOPT_DIR is replaced. Delete that directory, or" >&2
   echo "      the Dokploy app it came from, so it is not started again." >&2
 fi
@@ -448,6 +526,10 @@ fi
 if [[ -n "$CROWDSEC_WAS_ON" && -z "$CROWDSEC_ON" ]]; then
   info "turning CrowdSec off"
   COMPOSE_PROFILES=crowdsec docker compose rm --stop --force crowdsec crowdsec-firewall-bouncer
+fi
+if [[ -n "$BACKUP_WAS_ON" && -z "$BACKUP_ON" ]]; then
+  info "turning backups off (the repository and its snapshots stay)"
+  COMPOSE_PROFILES=backup docker compose rm --stop --force backup
 fi
 
 info "starting agent"
@@ -536,6 +618,29 @@ if [[ -n "$CROWDSEC_ON" ]]; then
       FAILED=1
       echo "  FAILING firewall bouncer: has not fetched decisions. docker logs grafana-prometheus-loki-crowdsec-bouncer"
     fi
+  fi
+fi
+
+# Backups: can the container reach and open the repository? That catches a
+# wrong URL, password or credential now rather than at 3 in the morning.
+if [[ -n "$BACKUP_ON" ]]; then
+  info "checking backups"
+  if out="$(docker exec grafana-prometheus-loki-backup backup check 2>&1 | tail -n 1)" && [[ "$out" == ok:* ]]; then
+    echo "  ok      restic: ${out#ok: }"
+    echo "          schedule: ${BACKUP_SCHEDULE:-0 3 * * *} (UTC). Run one now: docker exec grafana-prometheus-loki-backup backup"
+  else
+    FAILED=1
+    echo "  FAILING restic: ${out:-the backup container is not running}. docker logs grafana-prometheus-loki-backup"
+  fi
+  if [[ -n "$GENERATED_BACKUP_PASSWORD" ]]; then
+    echo
+    echo "  The backup repository's password, generated just now:"
+    echo
+    echo "      $RESTIC_PASSWORD"
+    echo
+    echo "  Store it somewhere other than this server, now. It is also in $ENV_FILE,"
+    echo "  but if this server is lost, so is that file, and without the password"
+    echo "  the backups cannot be read by anyone."
   fi
 fi
 

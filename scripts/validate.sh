@@ -137,12 +137,12 @@ for f in docker-compose.yml docker-compose.dev.yml agent/docker-compose.yml; do
     bad "$f"; echo "$out" | sed 's/^/       /'
   fi
 done
-# The agent again, with CrowdSec's optional services switched on.
-if out=$(cd agent && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x COMPOSE_PROFILES=crowdsec \
+# The agent again, with its optional services switched on.
+if out=$(cd agent && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x COMPOSE_PROFILES=crowdsec,backup \
           docker compose config -q 2>&1); then
-  ok "agent/docker-compose.yml with the crowdsec profile"
+  ok "agent/docker-compose.yml with the crowdsec and backup profiles"
 else
-  bad "agent/docker-compose.yml with the crowdsec profile"; echo "$out" | sed 's/^/       /'
+  bad "agent/docker-compose.yml with the crowdsec and backup profiles"; echo "$out" | sed 's/^/       /'
 fi
 
 # Dokploy builds these on every deploy; a Dockerfile that COPYs a file that
@@ -152,6 +152,12 @@ if out=$(RENDERER_TOKEN=x docker compose -f docker-compose.yml build --quiet 2>&
   ok "every service in docker-compose.yml builds"
 else
   bad "production image build"; echo "$out" | grep -v "level=warning" | tail -15 | sed 's/^/       /'
+fi
+# Built on each monitored host where backups are on.
+if out=$(docker build -q -f agent/backup/Dockerfile agent 2>&1); then
+  ok "agent/backup/Dockerfile builds"
+else
+  bad "agent/backup/Dockerfile"; echo "$out" | tail -15 | sed 's/^/       /'
 fi
 # Built on each monitored host where CrowdSec is on.
 for image in engine bouncer; do

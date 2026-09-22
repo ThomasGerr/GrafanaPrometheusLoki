@@ -4,5 +4,6 @@
 # host or by Dokploy, so a changed config file rebuilds and recreates it.
 FROM grafana/alloy:v1.19.0
 COPY config.alloy databases.alloy crowdsec.alloy /etc/alloy/
+COPY lib/db-url.sh /usr/local/lib/db-url.sh
 COPY entrypoint.sh /usr/local/bin/agent-entrypoint
 ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]

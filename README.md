@@ -37,9 +37,10 @@ need to open a port on a client's firewall.
 | **Databases** | PostgreSQL/Supabase, MySQL/MariaDB, Redis, MongoDB, SQL Server: whether it is reachable, connection pool use, load, cache hit ratio, size, replication, deadlocks |
 | **Logs** | Container and system logs, searchable for 14 days |
 | **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups. Optional CrowdSec blocks attackers automatically |
+| **Backups** | Optional restic backups of host paths, Docker volumes and a dump of every database: last good backup, failed runs and dumps, repository integrity |
 | **Itself** | Broken alert rules, alerts that never reach Alertmanager, emails that failed to send, stack services that stop, logs that Loki drops, agents that stopped reporting |
 
-53 alert rules come included. Each one has an entry in the
+57 alert rules come included. Each one has an entry in the
 [alert runbook](docs/alert-runbook.md) that explains what it means and what to
 check.
 
@@ -52,6 +53,12 @@ To block attackers automatically, turn on CrowdSec on a server with
 the install script). It bans attackers in that server's
 firewall, including ports Docker publishes, and comes with its own dashboard
 and alerts. See [docs/crowdsec.md](docs/crowdsec.md).
+
+Backups work the same way: add `backup` to `COMPOSE_PROFILES` and say where to
+store them (`RESTIC_REPOSITORY`), and restic backs that server up every night,
+including a consistent dump of every monitored database. Every run is
+reported, and a failed or missing backup raises an alert. See
+[docs/backups.md](docs/backups.md).
 
 ## What you need
 
@@ -309,7 +316,7 @@ config/                      Prometheus, Alertmanager, Loki, Grafana and ingest 
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: input for the Grafana setup
 scripts/                     generator, Grafana setup, checks
-docs/                        agent, architecture, onboarding, databases, CrowdSec, alert runbook
+docs/                        agent, architecture, onboarding, databases, CrowdSec, backups, alert runbook
 ```
 
 Generated files are committed to git, but never edit them by hand. Change

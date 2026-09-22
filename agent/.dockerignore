@@ -3,3 +3,6 @@
 !databases.alloy
 !crowdsec.alloy
 !entrypoint.sh
+!lib/db-url.sh
+!backup/backup.sh
+!backup/backup-entrypoint.sh

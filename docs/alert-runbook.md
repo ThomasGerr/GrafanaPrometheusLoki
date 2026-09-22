@@ -399,6 +399,72 @@ this without anything being wrong. Turn CrowdSec off there with
 
 ---
 
+## Backup alerts
+
+These cover the backups the agent runs with restic when its `backup` profile
+is on ([docs/backups.md](backups.md)). Every run logs what it did:
+`docker logs grafana-prometheus-loki-backup` on the host.
+
+### BackupFailed
+
+The most recent backup run did not complete. Earlier snapshots are unaffected;
+the run's log says which part failed:
+
+- **the repository** (`cannot reach or initialise`): a wrong or rotated
+  storage credential, a deleted bucket, or no network to the storage. Test
+  with `docker exec grafana-prometheus-loki-backup backup check`.
+- **a path** (`the file backup failed`): usually a directory that disappeared
+  or cannot be read.
+- **a database dump**: also fires **DatabaseDumpFailed**, which names it.
+- **the check**: also fires **BackupRepositoryDamaged**.
+
+Fix the cause, then run one by hand to confirm:
+`docker exec grafana-prometheus-loki-backup backup`.
+
+### BackupTooOld
+
+No backup of this host has succeeded for longer than `BACKUP_MAX_AGE_HOURS`
+(26 by default). Either the runs are failing (**BackupFailed** fires too), or
+they are not running at all: the backup container is stopped, or its
+schedule never comes round.
+
+```bash
+docker ps -a --filter name=grafana-prometheus-loki-backup
+docker logs --tail 30 grafana-prometheus-loki-backup     # "scheduled at ..." and each run
+```
+
+If this host really is backed up less often (weekly, say), raise
+`BACKUP_MAX_AGE_HOURS` to match rather than living with the alert.
+
+### BackupRepositoryDamaged
+
+`restic check` reported errors in the repository itself: missing or corrupt
+pack files, or an inconsistent index. Snapshots may not restore. Do not prune
+or forget anything until this is understood.
+
+```bash
+docker exec grafana-prometheus-loki-backup restic check          # the full report
+docker exec grafana-prometheus-loki-backup restic repair index   # for index errors
+docker exec grafana-prometheus-loki-backup restic repair snapshots --forget  # for snapshots pointing at lost data
+```
+
+A damaged repository usually means the storage lost or changed data behind
+restic's back. Take a fresh full backup into a new repository while you
+investigate, so this host is protected in the meantime.
+
+### DatabaseDumpFailed
+
+The dump of one database failed in the last run, so there is no new backup of
+it. The run's log shows the dump tool's error. The usual causes:
+
+- the backup user cannot read everything: give it the grants from
+  [backups.md](backups.md#what-is-backed-up), or set `BACKUP_DB_<NAME>` to a
+  user that can.
+- the database was unreachable at that moment, or its password changed.
+- a new major version of the database that the dump tool does not know yet.
+
+---
+
 ## Database alerts
 
 These cover the databases added to an agent with `--db`

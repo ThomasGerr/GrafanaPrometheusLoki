@@ -31,7 +31,12 @@ prometheus.exporter.unix "host" {
   // no rule or panel uses — each one costs scrape time here and 30 days of
   // storage centrally. Add a collector here, and its metrics to
   // prometheus.relabel "keep" below, before querying anything new.
-  set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "stat", "time", "timex"]
+  set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "stat", "time", "timex", "textfile"]
+
+  // The backup service's results (restic_*), when backups are on.
+  textfile {
+    directory = "/var/lib/node-textfile"
+  }
 
   filesystem {
     // Docker's overlay mounts would otherwise appear as hundreds of
@@ -159,7 +164,7 @@ prometheus.relabel "keep" {
 
   rule {
     source_labels = ["__name__"]
-    regex         = "up|alloy_build_info|node_(boot_time_seconds|cpu_seconds_total|disk_(read|written)_bytes_total|filesystem_(avail_bytes|files|files_free|readonly|size_bytes)|load1|load5|load15|memory_(Buffers|Cached|MemAvailable|MemTotal|SwapFree|SwapTotal)_bytes|network_(receive|transmit)_bytes_total|time_seconds|timex_offset_seconds)|container_(cpu_usage_seconds_total|last_seen|memory_working_set_bytes|network_(receive|transmit)_bytes_total|oom_events_total|spec_memory_limit_bytes|start_time_seconds)"
+    regex         = "up|alloy_build_info|node_(boot_time_seconds|cpu_seconds_total|disk_(read|written)_bytes_total|filesystem_(avail_bytes|files|files_free|readonly|size_bytes)|load1|load5|load15|memory_(Buffers|Cached|MemAvailable|MemTotal|SwapFree|SwapTotal)_bytes|network_(receive|transmit)_bytes_total|time_seconds|timex_offset_seconds)|restic_[a-z_]+|container_(cpu_usage_seconds_total|last_seen|memory_working_set_bytes|network_(receive|transmit)_bytes_total|oom_events_total|spec_memory_limit_bytes|start_time_seconds)"
     action        = "keep"
   }
 }
