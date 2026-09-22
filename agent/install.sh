@@ -24,6 +24,9 @@ HOST_NAME=""
 DB_ADD=()
 DB_REMOVE=()
 DB_NETWORKS=()
+CROWDSEC_MODE=""              # on, off, or empty to keep what the host has
+CROWDSEC_ENROLL_ARG=""
+CROWDSEC_WHITELIST_ARGS=()
 
 die() { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -32,6 +35,8 @@ usage() {
   cat >&2 <<USAGE
 Usage: install.sh --client <id> --ingest <url> --password <password> [--host <name>]
                   [--db [name=]<url>]... [--remove-db <name>]... [--db-network <network>]...
+                  [--crowdsec | --no-crowdsec] [--crowdsec-enroll-key <key>]
+                  [--crowdsec-whitelist <ip or cidr,...>]
 
   --client    Client id, exactly as it appears in the central clients.yml
   --ingest    Ingest gateway URL, e.g. https://ingest.example.com
@@ -56,6 +61,14 @@ Databases (repeatable; connections already on this host are kept):
   --db-network  Also join this Docker network, when a database is reachable
                 only on a network the automatic detection does not find.
 
+CrowdSec (detects attacks in this host's logs and blocks them in its firewall):
+  --crowdsec              Turn it on. Stays on for later runs until --no-crowdsec.
+  --no-crowdsec           Turn it off and remove its firewall rules.
+  --crowdsec-enroll-key   Link this server to app.crowdsec.net (turns it on).
+  --crowdsec-whitelist    Addresses never to block, comma-separated IPs or
+                          CIDRs. Added to earlier ones. The address you are
+                          connected over SSH from is added automatically.
+
 On a host where the agent is already installed, --client, --ingest,
 --password and --host default to the values it was installed with.
 USAGE
@@ -72,6 +85,10 @@ while [[ $# -gt 0 ]]; do
     --db)         DB_ADD+=("${2:-}");      shift 2 ;;
     --remove-db)  DB_REMOVE+=("${2:-}");   shift 2 ;;
     --db-network) DB_NETWORKS+=("${2:-}"); shift 2 ;;
+    --crowdsec)           CROWDSEC_MODE=on;  shift ;;
+    --no-crowdsec)        CROWDSEC_MODE=off; shift ;;
+    --crowdsec-enroll-key) CROWDSEC_ENROLL_ARG="${2:-}"; CROWDSEC_MODE="${CROWDSEC_MODE:-on}"; shift 2 ;;
+    --crowdsec-whitelist) CROWDSEC_WHITELIST_ARGS+=("${2:-}"); shift 2 ;;
     -h|--help)  usage ;;
     *)          die "unknown option: $1" ;;
   esac
@@ -353,6 +370,86 @@ for n in "${DB_NETWORKS[@]+"${DB_NETWORKS[@]}"}"; do
   [[ "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "--db-network: '$n' is not a Docker network name"
 done
 
+# ── CrowdSec: settings ──────────────────────────────────────────────────────
+# Everything is kept in .env, so a later run without CrowdSec flags leaves it
+# exactly as it was. Enabled means COMPOSE_PROFILES=crowdsec there, which is
+# what makes Compose start its two services at all.
+CROWDSEC_WAS_ON=""
+[[ "$(env_value COMPOSE_PROFILES)" == *crowdsec* ]] && CROWDSEC_WAS_ON=1
+case "$CROWDSEC_MODE" in
+  on)  CROWDSEC_ON=1 ;;
+  off) CROWDSEC_ON="" ;;
+  *)   CROWDSEC_ON="$CROWDSEC_WAS_ON" ;;
+esac
+
+valid_ip_or_cidr() {
+  [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]] \
+    || [[ "$1" == *:* && "$1" =~ ^[0-9a-fA-F:]+(/[0-9]{1,3})?$ ]]
+}
+
+# Addresses whoever is running this is logged in from over SSH. sudo drops
+# SSH_CLIENT from the environment, so `who` is the reliable source; both are
+# tried. Never banning the person who just turned the firewall on is the one
+# lockout that matters most.
+admin_ips() {
+  [[ -n "${SSH_CLIENT:-}" ]] && echo "${SSH_CLIENT%% *}"
+  who 2>/dev/null | awk -v u="${SUDO_USER:-$(logname 2>/dev/null || true)}" \
+    '$1 == u && match($0, /\(([0-9a-fA-F.:]+)\)/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
+}
+
+CROWDSEC_WHITELIST=""
+CROWDSEC_AUTO_WHITELISTED=""
+if [[ -n "$CROWDSEC_ON" ]]; then
+  entries=()
+  IFS=',' read -r -a entries <<<"$(env_value CROWDSEC_WHITELIST)"
+  for arg in "${CROWDSEC_WHITELIST_ARGS[@]+"${CROWDSEC_WHITELIST_ARGS[@]}"}"; do
+    IFS=',' read -r -a more <<<"$arg"
+    for e in "${more[@]+"${more[@]}"}"; do
+      e="${e//[[:space:]]/}"
+      [[ -n "$e" ]] || continue
+      valid_ip_or_cidr "$e" || die "--crowdsec-whitelist: '$e' is not an IP address or CIDR range"
+      entries+=("$e")
+    done
+  done
+  while read -r ip; do
+    [[ -n "$ip" ]] && valid_ip_or_cidr "$ip" || continue
+    [[ ",$(IFS=,; echo "${entries[*]+"${entries[*]}"}")," == *",$ip,"* ]] && continue
+    entries+=("$ip")
+    CROWDSEC_AUTO_WHITELISTED="$CROWDSEC_AUTO_WHITELISTED $ip"
+  done < <(admin_ips | sort -u)
+  CROWDSEC_WHITELIST="$(printf '%s\n' "${entries[@]+"${entries[@]}"}" | grep -v '^$' | sort -u | paste -sd, - || true)"
+
+  # The bouncer's key for CrowdSec's local API: made once, then kept.
+  CROWDSEC_BOUNCER_KEY="$(env_value CROWDSEC_BOUNCER_KEY)"
+  [[ -n "$CROWDSEC_BOUNCER_KEY" ]] \
+    || CROWDSEC_BOUNCER_KEY="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+
+  # The local API is published on the host's loopback for the bouncer, so
+  # its port must be free there. Keep the one already in use; otherwise take
+  # the first free one from 8089.
+  CROWDSEC_LAPI_PORT="$(env_value CROWDSEC_LAPI_PORT)"
+  if [[ -z "$CROWDSEC_LAPI_PORT" ]]; then
+    for port in $(seq 8089 8099); do
+      if ! (command -v ss >/dev/null && ss -ltnH "sport = :$port" | grep -q .); then
+        CROWDSEC_LAPI_PORT=$port
+        break
+      fi
+    done
+    [[ -n "$CROWDSEC_LAPI_PORT" ]] || die "no free port between 8089 and 8099 for CrowdSec's local API"
+  fi
+
+  # Dokploy's Traefik writes its access log to a file rather than stdout.
+  CROWDSEC_TRAEFIK_DIR=""
+  [[ -f /etc/dokploy/traefik/dynamic/access.log ]] && CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic
+else
+  # Off: keep the settings, so turning it back on later restores the same
+  # whitelist and key rather than starting over.
+  CROWDSEC_WHITELIST="$(env_value CROWDSEC_WHITELIST)"
+  CROWDSEC_BOUNCER_KEY="$(env_value CROWDSEC_BOUNCER_KEY)"
+  CROWDSEC_LAPI_PORT="$(env_value CROWDSEC_LAPI_PORT)"
+  CROWDSEC_TRAEFIK_DIR="$(env_value CROWDSEC_TRAEFIK_DIR)"
+fi
+
 # ── Fetch config ────────────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
 
@@ -375,9 +472,11 @@ fetch() {
   # before pushing them.
   if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/$name" ]]; then
     info "using local $name"
+    mkdir -p "$(dirname "$INSTALL_DIR/$name")"
     cp "$SCRIPT_DIR/$name" "$INSTALL_DIR/$name"
   else
     info "downloading $name"
+    mkdir -p "$(dirname "$INSTALL_DIR/$name")"
     curl -fsSL "$RAW_BASE/$name" -o "$INSTALL_DIR/$name" \
       || die "could not download $name from $RAW_BASE
   If the repository is private, raw.githubusercontent.com returns 404 for
@@ -388,7 +487,10 @@ fetch() {
 
 fetch config.alloy
 fetch databases.alloy
+fetch crowdsec.alloy
 fetch docker-compose.yml
+fetch crowdsec/Dockerfile
+fetch crowdsec/firewall-bouncer.yaml
 
 # ── Credentials ─────────────────────────────────────────────────────────────
 umask 077
@@ -399,7 +501,61 @@ INGEST_URL=$INGEST_URL
 INGEST_PASSWORD=$INGEST_PASSWORD
 JOURNAL_DIR=$JOURNAL_DIR
 ENVEOF
+[[ -z "$CROWDSEC_ON" ]] || echo "COMPOSE_PROFILES=crowdsec" >> "$INSTALL_DIR/.env"
+if [[ -n "$CROWDSEC_BOUNCER_KEY" ]]; then
+  cat >> "$INSTALL_DIR/.env" <<ENVEOF
+CROWDSEC_BOUNCER_KEY=$CROWDSEC_BOUNCER_KEY
+CROWDSEC_WHITELIST=$CROWDSEC_WHITELIST
+CROWDSEC_LAPI_PORT=$CROWDSEC_LAPI_PORT
+CROWDSEC_TRAEFIK_DIR=$CROWDSEC_TRAEFIK_DIR
+ENVEOF
+fi
 chmod 600 "$INSTALL_DIR/.env"
+
+# ── CrowdSec: what to read ──────────────────────────────────────────────────
+# Written every run, used only when it is on. Every source is optional: a
+# host without a journal, Traefik or nginx simply has less to read.
+mkdir -p "$INSTALL_DIR/crowdsec/no-traefik"
+{
+  echo "# Written by install.sh: the logs CrowdSec reads on this host."
+  if [[ "$JOURNAL_DIR" != "$INSTALL_DIR/no-journal" ]]; then
+    cat <<'ACQEOF'
+# sshd, from the host's journal. OpenSSH 9.8+ logs as sshd-session.
+source: journalctl
+journalctl_filter:
+  - "_COMM=sshd"
+  - "_COMM=sshd-session"
+labels:
+  type: syslog
+---
+ACQEOF
+  fi
+  cat <<'ACQEOF'
+# Reverse proxies logging to stdout, by container name.
+source: docker
+container_name_regexp:
+  - "(?i)traefik"
+labels:
+  type: traefik
+---
+source: docker
+container_name_regexp:
+  - "(?i)nginx"
+labels:
+  type: nginx
+ACQEOF
+  if [[ -n "${CROWDSEC_TRAEFIK_DIR:-}" ]]; then
+    cat <<'ACQEOF'
+---
+# Dokploy's Traefik access log.
+source: file
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+ACQEOF
+  fi
+} > "$INSTALL_DIR/crowdsec/acquis.yaml"
 
 # ── Databases ───────────────────────────────────────────────────────────────
 mkdir -p "$DB_DIR"
@@ -425,7 +581,8 @@ fi
 # database leaves no secret or component behind. Empty the directory rather
 # than replacing it: a running agent has this exact directory bind-mounted,
 # and a new one in its place would be invisible to it.
-mkdir -p -m 700 "$INSTALL_DIR/db-secrets"
+mkdir -p "$INSTALL_DIR/db-secrets"
+chmod 700 "$INSTALL_DIR/db-secrets"
 find "$INSTALL_DIR/db-secrets" -mindepth 1 -delete
 cat > "$INSTALL_DIR/connections.alloy" <<'ALLOYEOF'
 // Written by install.sh from db-connections/ — edit with --db / --remove-db.
@@ -440,6 +597,15 @@ for f in "$DB_DIR"/*.url; do
   build_db "$name" "$(head -n 1 "$f")"
   DB_ALL+=("$name")
 done
+
+if [[ -n "$CROWDSEC_ON" ]]; then
+  cat >> "$INSTALL_DIR/connections.alloy" <<'ALLOYEOF'
+
+crowdsec_metrics "local" {
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+ALLOYEOF
+fi
 
 # Networks to join: those found for each database plus any given by hand.
 # One that no longer exists would stop `docker compose up`, so skip it loudly.
@@ -476,11 +642,28 @@ fi
 info "starting agent"
 cd "$INSTALL_DIR"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-docker compose pull --quiet 2>/dev/null || docker compose pull
+# The bouncer is built here, not pulled, so leave it out of the pull.
+docker compose pull --quiet --ignore-buildable 2>/dev/null \
+  || docker compose pull --ignore-pull-failures
+# Turned off: remove CrowdSec's containers. Compose would otherwise leave
+# them running, since a service outside the active profiles is not an
+# orphan. Stopping the bouncer removes its firewall rules; its volumes are
+# kept, so turning it back on resumes with the same decisions.
+if [[ -n "$CROWDSEC_WAS_ON" && -z "$CROWDSEC_ON" ]]; then
+  info "turning CrowdSec off"
+  COMPOSE_PROFILES=crowdsec docker compose rm --stop --force crowdsec crowdsec-firewall-bouncer
+fi
 # Always recreate. Alloy does not watch its config files, and Compose leaves
 # a container alone when its definition is unchanged — so without this a
 # re-run with new databases, or a new config.alloy, would change nothing.
-docker compose up -d --remove-orphans --force-recreate
+# --build builds the CrowdSec bouncer when that is on, and rebuilds it when
+# its Dockerfile changed.
+#
+# Not fatal: if CrowdSec fails to become healthy, its bouncer cannot start
+# and `up` exits non-zero, but the agent itself is running. The checks below
+# report exactly what failed instead of the installer stopping here.
+docker compose up -d --remove-orphans --force-recreate --build \
+  || echo "warning: not every service started; see the checks below" >&2
 
 # ── Verify ──────────────────────────────────────────────────────────────────
 info "waiting for the agent to settle"
@@ -498,7 +681,7 @@ fi
 # wrong password or a firewall immediately instead of a day later. Database
 # components are left out: a wrong database password also says
 # "authentication", and is reported separately below.
-if docker compose logs --tail 200 2>/dev/null | grep -v 'component_path=/database_' \
+if docker compose logs --tail 200 alloy 2>/dev/null | grep -v 'component_path=/database_' \
      | grep -qiE 'non-recoverable error.*(401|403)|authentication'; then
   echo >&2
   echo "The agent started but the ingest gateway rejected its credentials." >&2
@@ -514,7 +697,7 @@ DB_FAILED=0
 if [[ ${#DB_ALL[@]} -gt 0 ]]; then
   info "checking database connections"
   sleep 35
-  logs="$(docker compose logs --since "$STARTED_AT" 2>/dev/null | grep 'level=error' \
+  logs="$(docker compose logs --since "$STARTED_AT" alloy 2>/dev/null | grep 'level=error' \
           | grep -v 'was collected before' || true)"
   for name in "${DB_ALL[@]}"; do
     engine="${DB_ENGINES[$name]}"
@@ -532,6 +715,70 @@ if [[ ${#DB_ALL[@]} -gt 0 ]]; then
   done
 fi
 
+# CrowdSec: wait until its local API answers, bring the allowlist in line
+# with CROWDSEC_WHITELIST, then confirm the bouncer is actually pulling
+# decisions. Detection without a working bouncer blocks nothing, and that is
+# easy to miss.
+CROWDSEC_FAILED=0
+if [[ -n "$CROWDSEC_ON" ]]; then
+  info "checking CrowdSec"
+  cs() { docker exec grafana-prometheus-loki-crowdsec cscli "$@"; }
+  for _ in $(seq 60); do cs lapi status >/dev/null 2>&1 && break; sleep 3; done
+  if ! cs lapi status >/dev/null 2>&1; then
+    CROWDSEC_FAILED=1
+    echo "  FAILING crowdsec: its local API did not come up. docker logs grafana-prometheus-loki-crowdsec"
+  else
+    # Recreated from scratch each run, so a removed address really goes.
+    # An allowlist covers every source of decisions: this host's own
+    # detections, the community blocklist, the console and cscli.
+    cs allowlists delete grafana-prometheus-loki >/dev/null 2>&1 || true
+    cs allowlists create grafana-prometheus-loki -d "Never block: install.sh --crowdsec-whitelist" >/dev/null
+    if [[ -n "$CROWDSEC_WHITELIST" ]]; then
+      # shellcheck disable=SC2046
+      cs allowlists add grafana-prometheus-loki $(tr ',' ' ' <<<"$CROWDSEC_WHITELIST") -d "install.sh" >/dev/null
+    fi
+    echo "  ok      crowdsec: detecting, never blocking: ${CROWDSEC_WHITELIST:-nothing whitelisted}"
+    [[ -z "$CROWDSEC_AUTO_WHITELISTED" ]] \
+      || echo "          (whitelisted automatically, you are connected from:$CROWDSEC_AUTO_WHITELISTED)"
+
+    # Console enrollment happens once, when a key is given. A bad key is a
+    # warning, not a failure: CrowdSec protects the host either way.
+    if [[ -n "$CROWDSEC_ENROLL_ARG" ]]; then
+      if out="$(cs console enroll --overwrite --name "$HOST_NAME" --tags "$CLIENT_ID" "$CROWDSEC_ENROLL_ARG" 2>&1)"; then
+        docker restart grafana-prometheus-loki-crowdsec >/dev/null
+        for _ in $(seq 60); do cs lapi status >/dev/null 2>&1 && break; sleep 3; done
+        echo "  ok      console: enrollment sent; accept '$HOST_NAME' at app.crowdsec.net"
+      else
+        echo "  WARNING console: enrollment failed, CrowdSec runs without it: $(tail -n 1 <<<"$out" | cut -c1-160)"
+      fi
+    fi
+
+    # Register the bouncer under the key in .env, every run. CrowdSec keeps
+    # an existing registration when it restarts, so if the key ever changes
+    # (a lost .env, a reset volume) the bouncer would be refused for good.
+    cs bouncers delete firewall >/dev/null 2>&1 || true
+    cs bouncers add firewall --key "$CROWDSEC_BOUNCER_KEY" >/dev/null
+    docker restart grafana-prometheus-loki-crowdsec-bouncer >/dev/null 2>&1 || true
+
+    # A pull from before this run proves nothing, so compare against the
+    # start time. Both are UTC ISO 8601, which sorts as text.
+    pulled=""
+    for _ in $(seq 20); do
+      last="$(cs bouncers list -o raw 2>/dev/null | awk -F, '$1 == "firewall" { print $4 }')"
+      if [[ -n "$last" && ! "$last" < "$STARTED_AT" ]]; then
+        pulled=1; break
+      fi
+      sleep 3
+    done
+    if [[ -n "$pulled" ]]; then
+      echo "  ok      firewall bouncer: pulling decisions, blocking in nftables"
+    else
+      CROWDSEC_FAILED=1
+      echo "  FAILING firewall bouncer: has not contacted CrowdSec. docker logs grafana-prometheus-loki-crowdsec-bouncer"
+    fi
+  fi
+fi
+
 echo
 info "done — $HOST_NAME is reporting as client '$CLIENT_ID'"
 echo
@@ -541,5 +788,10 @@ echo "  remove:   docker compose -f $INSTALL_DIR/docker-compose.yml down -v && r
 echo
 if [[ "$DB_FAILED" -ne 0 ]]; then
   echo "Fix the failing database with --db <name>=<corrected url>, or drop it with --remove-db <name>."
+  echo
+fi
+if [[ "$CROWDSEC_FAILED" -ne 0 ]]; then
+  echo "CrowdSec is not protecting this host yet. Its logs say why; re-run this installer"
+  echo "once fixed, or turn it off with --no-crowdsec."
   echo
 fi

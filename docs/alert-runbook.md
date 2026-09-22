@@ -349,6 +349,53 @@ almost nothing), deserves suspicion. An agent error about the journal
 directory usually means the agent is older than its install script: re-run
 the install command to upgrade it.
 
+### CrowdSecDown
+
+The agent cannot reach CrowdSec on a host where it is turned on. Bans that
+already exist keep working, because the firewall bouncer holds on to them. New
+attacks are neither detected nor blocked until CrowdSec is back.
+
+```bash
+docker ps -a --filter name=grafana-prometheus-loki-crowdsec
+docker logs --tail 50 grafana-prometheus-loki-crowdsec
+```
+
+It usually fails at start: the hub (where it downloads its parsers and
+scenarios) was unreachable, or the data volume was removed. Re-running the
+installer recreates it and reports what fails.
+
+### CrowdSecBouncerNotBlocking
+
+CrowdSec is running and detecting, but the firewall bouncer has not fetched
+its decisions for 10 minutes. Whatever CrowdSec bans is **not actually
+blocked**, and nothing else would tell you: the dashboard still shows bans.
+
+```bash
+docker logs --tail 30 grafana-prometheus-loki-crowdsec-bouncer
+```
+
+- `operation not permitted` from nftables: the container lost `NET_ADMIN`, or
+  the host kernel has no nftables support. Re-run the installer.
+- `403` or `access forbidden`: the bouncer's key no longer matches what
+  CrowdSec has registered, usually after CrowdSec's config volume was
+  deleted. Re-running the installer registers it again.
+- Restarting over and over: CrowdSec's local API is not answering. Look at
+  **CrowdSecDown** first.
+
+### CrowdSecNotReadingLogs
+
+CrowdSec is running but has read no log lines from any source for two hours.
+An internet-facing host normally sees SSH probes and web scanners around the
+clock, so this means CrowdSec has lost its log sources.
+`docker exec grafana-prometheus-loki-crowdsec cscli metrics show acquisition` shows
+what each source has read. Common causes: the host's journal moved (re-run
+the installer, which detects it again), or Traefik or nginx was renamed so
+the container name no longer contains "traefik" or "nginx".
+
+A host that really is quiet, such as one only reachable over a VPN, can fire
+this without anything being wrong. Turn CrowdSec off there with
+`--no-crowdsec`; it has nothing to protect against.
+
 ---
 
 ## Database alerts

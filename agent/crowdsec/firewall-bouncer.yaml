@@ -1,0 +1,36 @@
+# Firewall bouncer: pulls CrowdSec's decisions every 10 seconds and drops
+# traffic from banned addresses in the host's kernel. ${...} is expanded
+# from the environment docker-compose.yml passes in.
+mode: nftables
+update_frequency: 10s
+log_mode: stdout
+log_level: info
+
+api_url: http://127.0.0.1:${CROWDSEC_LAPI_PORT}/
+api_key: ${CROWDSEC_BOUNCER_KEY}
+
+deny_action: DROP
+supported_decisions_types:
+  - ban
+
+# Its own nftables tables, hooked into both input (traffic to the host) and
+# forward (traffic Docker forwards to a published container port). Docker's
+# rules cannot let a banned address through: in nftables every base chain on
+# a hook must accept a packet, so a drop here wins. The tables are removed
+# again when the bouncer stops.
+nftables:
+  ipv4:
+    enabled: true
+    set-only: false
+    table: crowdsec
+    chain: crowdsec-chain
+    priority: -10
+  ipv6:
+    enabled: true
+    set-only: false
+    table: crowdsec6
+    chain: crowdsec6-chain
+    priority: -10
+nftables_hooks:
+  - input
+  - forward

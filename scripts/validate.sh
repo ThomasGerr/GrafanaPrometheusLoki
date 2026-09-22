@@ -105,17 +105,20 @@ docker network rm "$net" >/dev/null 2>&1
 # database component fails here rather than on a client's server.
 step "Agent config"
 agent_dir=$(mktemp -d)
-cp agent/config.alloy agent/databases.alloy "$agent_dir/"
-for engine in postgres mysql redis mongodb mssql; do
-  printf 'database_%s "db_%s" {\n  name = "%s"\n' "$engine" "$engine" "$engine"
-  [ "$engine" = redis ] && printf '  address = "redis://redis:6379"\n'
-  printf '  secret_file = "/dev/null"\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
-done > "$agent_dir/connections.alloy"
+cp agent/config.alloy agent/databases.alloy agent/crowdsec.alloy "$agent_dir/"
+{
+  for engine in postgres mysql redis mongodb mssql; do
+    printf 'database_%s "db_%s" {\n  name = "%s"\n' "$engine" "$engine" "$engine"
+    [ "$engine" = redis ] && printf '  address = "redis://redis:6379"\n'
+    printf '  secret_file = "/dev/null"\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
+  done
+  printf 'crowdsec_metrics "local" {\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
+} > "$agent_dir/connections.alloy"
 if out=$(docker run --rm -v "$agent_dir:/a:ro" \
           -e CLIENT_ID=validate -e HOST_NAME=validate \
           -e INGEST_URL=https://example.com -e INGEST_PASSWORD=x \
           "$ALLOY_IMAGE" validate /a 2>&1); then
-  ok "agent/config.alloy + databases.alloy (all five engines)"
+  ok "agent/config.alloy + databases.alloy (all five engines) + crowdsec.alloy"
 else
   bad "agent config"; echo "$out" | sed 's/^/       /'
 fi
@@ -134,6 +137,13 @@ for f in docker-compose.yml docker-compose.dev.yml agent/docker-compose.yml; do
     bad "$f"; echo "$out" | sed 's/^/       /'
   fi
 done
+# The agent again, with CrowdSec's optional services switched on.
+if out=$(cd agent && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x COMPOSE_PROFILES=crowdsec \
+          docker compose config -q 2>&1); then
+  ok "agent/docker-compose.yml with the crowdsec profile"
+else
+  bad "agent/docker-compose.yml with the crowdsec profile"; echo "$out" | sed 's/^/       /'
+fi
 
 # Dokploy builds these on every deploy; a Dockerfile that COPYs a file that
 # is not there should fail here, not on the server.
@@ -142,6 +152,12 @@ if out=$(RENDERER_TOKEN=x docker compose -f docker-compose.yml build --quiet 2>&
   ok "every service in docker-compose.yml builds"
 else
   bad "production image build"; echo "$out" | grep -v "level=warning" | tail -15 | sed 's/^/       /'
+fi
+# Built on each monitored host where CrowdSec is on.
+if out=$(docker build -q agent/crowdsec 2>&1); then
+  ok "agent/crowdsec (firewall bouncer) builds"
+else
+  bad "agent/crowdsec build"; echo "$out" | tail -15 | sed 's/^/       /'
 fi
 
 # ── Dashboards ─────────────────────────────────────────────────────────────

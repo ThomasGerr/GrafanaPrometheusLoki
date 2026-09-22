@@ -1,0 +1,40 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// grafana-prometheus-loki agent — CrowdSec metrics
+//
+// Defined here, used only when CrowdSec is enabled: install.sh --crowdsec
+// then adds this to connections.alloy:
+//
+//   crowdsec_metrics "local" {
+//     forward_to = [prometheus.remote_write.central.receiver]
+//   }
+//
+// The engine runs as the `crowdsec` service on the agent's Compose network
+// and serves its metrics on port 6060. The central rules in
+// config/prometheus/rules/crowdsec.rules.yml and the CrowdSec dashboard read
+// them; like everywhere else in the agent, only the metrics those use are
+// kept. Add a name to the allowlist before using it in a rule or a panel.
+// ═══════════════════════════════════════════════════════════════════════════
+
+declare "crowdsec_metrics" {
+  argument "forward_to" { comment = "Where to send the metrics" }
+
+  prometheus.scrape "crowdsec" {
+    targets = [{
+      "__address__" = "crowdsec:6060",
+      "instance"    = sys.env("HOST_NAME"),
+      "job"         = "crowdsec",
+    }]
+    forward_to      = [prometheus.relabel.crowdsec.receiver]
+    job_name        = "crowdsec"
+    scrape_interval = "30s"
+  }
+
+  prometheus.relabel "crowdsec" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "up|cs_(info|active_decisions|alerts|lapi_bouncer_requests_total|(docker|journalctl|file)source_hits_total|parser_hits_(ok_)?total)"
+      action        = "keep"
+    }
+  }
+}

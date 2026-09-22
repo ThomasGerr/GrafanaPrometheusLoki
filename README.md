@@ -36,17 +36,21 @@ need to open a port on a client's firewall.
 | **Websites** | Whether it is up, how fast it responds, HTTP status, when the TLS certificate expires |
 | **Databases** | PostgreSQL/Supabase, MySQL/MariaDB, Redis, MongoDB, SQL Server: whether it is reachable, connection pool use, load, cache hit ratio, size, replication, deadlocks |
 | **Logs** | Container and system logs, searchable for 14 days |
-| **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups |
+| **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups. Optional CrowdSec blocks attackers automatically |
 | **Itself** | Broken alert rules, alerts that never reach Alertmanager, emails that failed to send, stack services that stop, logs that Loki drops, agents that stopped reporting |
 
-50 alert rules come included. Each one has an entry in the
+53 alert rules come included. Each one has an entry in the
 [alert runbook](docs/alert-runbook.md) that explains what it means and what to
 check.
 
 The security alerts read each server's system logs, and the **Security**
 dashboard shows the logins, `sudo` use and account changes behind them. They
-detect and warn; they do not block anything. To block attackers
-automatically, add a tool such as fail2ban or CrowdSec on the servers.
+detect and warn; they do not block anything.
+
+To block attackers automatically, turn on CrowdSec on a server by adding
+`--crowdsec` to the agent install command. It bans attackers in that server's
+firewall, including ports Docker publishes, and comes with its own dashboard
+and alerts. See [docs/crowdsec.md](docs/crowdsec.md).
 
 ## What you need
 
@@ -148,7 +152,8 @@ same command again later upgrades the agent.
 
 The agent is light: measured on a server running 21 containers, it used about
 5% of one CPU core, 260 MiB of memory and 230 MB a day of upload, plus whatever
-its logs add. It only sends the metrics the alerts and dashboards use.
+its logs add. It only sends the metrics the alerts and dashboards use. CrowdSec,
+if you turn it on, adds about 110 MiB.
 
 The `NoClientDataAtAll` alert stays on until the agent of your first real
 client reports in. That is expected.
@@ -290,7 +295,7 @@ config/                      Prometheus, Alertmanager, Loki, Grafana and ingest 
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: input for the Grafana setup
 scripts/                     generator, Grafana setup, checks
-docs/                        architecture, onboarding, databases, alert runbook
+docs/                        architecture, onboarding, databases, CrowdSec, alert runbook
 ```
 
 Generated files are committed to git, but never edit them by hand. Change

@@ -2,7 +2,7 @@
 """Every metric a rule or dashboard queries must survive an allowlist.
 
 The agent only sends metrics its `keep` relabel rules name (agent/config.alloy,
-agent/databases.alloy), and the central Prometheus keeps only listed metrics
+agent/databases.alloy, agent/crowdsec.alloy), and the central Prometheus keeps only listed metrics
 from the stack's own services (metric_relabel_configs in prometheus.yml). A
 panel or alert on anything else would quietly show no data or never fire, so
 this fails instead.
@@ -32,7 +32,7 @@ PROMQL_KEYWORDS = {
 
 def allowlists():
     patterns = []
-    for f in ("agent/config.alloy", "agent/databases.alloy"):
+    for f in ("agent/config.alloy", "agent/databases.alloy", "agent/crowdsec.alloy"):
         text = (ROOT / f).read_text()
         for m in re.finditer(r'regex\s*=\s*"([^"]+)"\s*\n\s*action\s*=\s*"keep"', text):
             # Prometheus relabel regexes are anchored at both ends.
@@ -159,7 +159,7 @@ def main():
                                     " in config/prometheus/prometheus.yml")
             elif not any(p.match(name) for p in keep):
                 problems.append(f"{where}: {name} is dropped by the agent's allowlist"
-                                " (agent/config.alloy, or the engine's in agent/databases.alloy)")
+                                " (agent/config.alloy, databases.alloy or crowdsec.alloy)")
     if problems:
         sys.exit("metrics that never reach Prometheus:\n  " + "\n  ".join(problems))
     print(f"{len(checked)} metrics used by {len(items)} queries all reach Prometheus")

@@ -3,6 +3,11 @@
 #
 # Installed to /opt/grafana-prometheus-loki-agent by install.sh. One container; it
 # opens no inbound ports and only ever connects outbound to the ingest URL.
+#
+# Optional: CrowdSec, which detects attacks in the same logs and blocks the
+# attackers in the host's firewall. Its two services are in the `crowdsec`
+# profile, so they exist only when install.sh --crowdsec has put
+# COMPOSE_PROFILES=crowdsec in .env. See docs/crowdsec.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -45,6 +50,9 @@ services:
       # networks, which install.sh adds in docker-compose.override.yml.
       - ./databases.alloy:/etc/alloy/databases.alloy:ro
       - ./connections.alloy:/etc/alloy/connections.alloy:ro
+      # Collects CrowdSec's metrics when it is enabled (connections.alloy
+      # then instantiates it); inert otherwise.
+      - ./crowdsec.alloy:/etc/alloy/crowdsec.alloy:ro
       - ./db-secrets:/etc/alloy-secrets:ro
       # Write-ahead log. Metrics survive a central outage and replay on
       # reconnect, so a maintenance window leaves no gap in the graphs.
@@ -67,5 +75,80 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── CrowdSec (optional, `crowdsec` profile) ──────────────────────────────
+  # The detection engine. Reads the host's journal (sshd) and container logs
+  # (Traefik, nginx), and decides whom to ban. The Debian image because the
+  # journal source runs journalctl, which the Alpine images do not have.
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.8.1-debian
+    container_name: grafana-prometheus-loki-crowdsec
+    profiles: [crowdsec]
+    restart: unless-stopped
+    environment:
+      COLLECTIONS: >-
+        crowdsecurity/linux crowdsecurity/sshd crowdsecurity/traefik
+        crowdsecurity/nginx crowdsecurity/whitelist-good-actors
+      # Registers the firewall bouncer below under this key.
+      BOUNCER_KEY_firewall: ${CROWDSEC_BOUNCER_KEY:-}
+      # No ENROLL_KEY here on purpose: the image enrolls at every start and
+      # exits if that fails, so one mistyped key would crash-loop CrowdSec
+      # and leave the host unprotected. install.sh enrolls once instead,
+      # after CrowdSec is up, and only warns when it fails.
+    volumes:
+      # Written by install.sh: which logs to read. Whom never to ban is an
+      # allowlist in its database, which install.sh keeps in sync.
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      # Its database of decisions, and the hub items and credentials it
+      # downloads on first start.
+      - crowdsec-data:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Dokploy's Traefik writes its access log to a file, not stdout.
+      # install.sh points this at it, or at an empty directory.
+      - ${CROWDSEC_TRAEFIK_DIR:-./crowdsec/no-traefik}:/var/log/traefik:ro
+    ports:
+      # The local API, for the bouncer, which runs in the host's network.
+      # Loopback only.
+      - "127.0.0.1:${CROWDSEC_LAPI_PORT:-8089}:8080"
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # The part that blocks. Pulls decisions from the engine every 10 seconds
+  # and drops banned addresses in nftables, for the host and for Docker's
+  # published ports alike. Needs the host's network and NET_ADMIN for that,
+  # and nothing else. Built here from CrowdSec's package: crowdsec/Dockerfile.
+  crowdsec-firewall-bouncer:
+    build: ./crowdsec
+    image: grafana-prometheus-loki/crowdsec-firewall-bouncer
+    container_name: grafana-prometheus-loki-crowdsec-bouncer
+    profiles: [crowdsec]
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
+      CROWDSEC_LAPI_PORT: ${CROWDSEC_LAPI_PORT:-8089}
+    depends_on:
+      crowdsec:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   alloy-data:
+  crowdsec-data:
+  crowdsec-config:

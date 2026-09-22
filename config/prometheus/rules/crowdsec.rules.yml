@@ -1,0 +1,60 @@
+groups:
+  # CrowdSec, on hosts where install.sh --crowdsec turned it on. Hosts without
+  # it have no job="crowdsec" series at all, so none of these can fire there.
+  #
+  # The raw metrics come from agent/crowdsec.alloy; a metric used here must be
+  # on its allowlist.
+  - name: crowdsec
+    rules:
+      # Addresses already banned stay banned: the bouncer keeps its firewall
+      # rules while the engine is down. New attacks go undetected.
+      - alert: CrowdSecDown
+        expr: up{job="crowdsec"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec is down on {{ $labels.instance }}"
+          description: >-
+            The agent cannot reach CrowdSec on {{ $labels.instance }}. Existing
+            bans still hold, but new attacks are neither detected nor blocked.
+          runbook: "docs/alert-runbook.md#crowdsecdown"
+
+      # CrowdSec detecting while nothing blocks is the failure that looks
+      # like protection. The bouncer polls every 10 seconds; no poll in 10
+      # minutes means it is stopped, crash-looping or using the wrong key.
+      # `unless` rather than `== 0`: a bouncer that never connected has no
+      # series to be zero.
+      - alert: CrowdSecBouncerNotBlocking
+        expr: |
+          up{job="crowdsec"} == 1
+          unless on (client, instance)
+          sum by (client, instance) (rate(cs_lapi_bouncer_requests_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec on {{ $labels.instance }} is detecting but not blocking"
+          description: >-
+            The firewall bouncer has not fetched decisions for 10 minutes, so
+            attackers CrowdSec bans are not actually blocked.
+          runbook: "docs/alert-runbook.md#crowdsecbouncernotblocking"
+
+      # A host on the internet sees SSH probes and HTTP scanners around the
+      # clock. Two hours without a single log line read means CrowdSec has
+      # lost its log sources, and with them any chance of detecting anything.
+      - alert: CrowdSecNotReadingLogs
+        expr: |
+          up{job="crowdsec"} == 1
+          unless on (client, instance) (sum by (client, instance) (rate(cs_dockersource_hits_total[2h])) > 0)
+          unless on (client, instance) (sum by (client, instance) (rate(cs_journalctlsource_hits_total[2h])) > 0)
+          unless on (client, instance) (sum by (client, instance) (rate(cs_filesource_hits_total[2h])) > 0)
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec on {{ $labels.instance }} has read no logs for hours"
+          description: >-
+            CrowdSec is running but none of its log sources have delivered a
+            line in over two hours, so it cannot detect attacks.
+          runbook: "docs/alert-runbook.md#crowdsecnotreadinglogs"
