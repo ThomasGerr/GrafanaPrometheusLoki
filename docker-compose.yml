@@ -16,8 +16,14 @@
 # Prometheus, Alertmanager, Loki and blackbox are reachable only from inside
 # the network. See `make tunnel` for temporary local access to them.
 #
+# Config is baked into each image (config/<service>/Dockerfile) rather than
+# mounted. Dokploy deploys with `up --build`, so a redeploy rebuilds from the
+# commit and recreates exactly the services whose config changed: new alert
+# rules, routes, dashboards and probe targets take effect without anyone
+# restarting anything.
+#
 # For local development use docker-compose.dev.yml (`make up`), which is the
-# same stack with 127.0.0.1 ports published.
+# same stack with 127.0.0.1 ports published and the config bind-mounted.
 # ─────────────────────────────────────────────────────────────────────────────
 
 include:
@@ -34,7 +40,8 @@ services:
 
   # ── Metrics storage ────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v3.13.2
+    build: ./config/prometheus
+    image: grafana-prometheus-loki/prometheus
     container_name: em-prometheus
     restart: unless-stopped
     user: "65534:65534"
@@ -45,11 +52,8 @@ services:
       - --storage.tsdb.retention.size=20GB
       # Required: agents push to us instead of us scraping them.
       - --web.enable-remote-write-receiver
-      # Allows `make reload` to apply config without a restart.
-      - --web.enable-lifecycle
       - --web.external-url=/
     volumes:
-      - ./config/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
     networks: [monitor]
     logging: *default-logging
@@ -62,7 +66,8 @@ services:
 
   # ── Alert routing ──────────────────────────────────────────────────────────
   alertmanager:
-    image: prom/alertmanager:v0.34.0
+    build: ./config/alertmanager
+    image: grafana-prometheus-loki/alertmanager
     container_name: em-alertmanager
     restart: unless-stopped
     user: "65534:65534"
@@ -84,7 +89,6 @@ services:
       SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
       OPS_EMAIL: ${OPS_EMAIL}
     volumes:
-      - ./config/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
     networks: [monitor]
     logging: *default-logging
@@ -97,14 +101,13 @@ services:
 
   # ── Log storage (multi-tenant) ─────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.7.6
+    build: ./config/loki
+    image: grafana-prometheus-loki/loki
     container_name: em-loki
     restart: unless-stopped
     user: "10001:10001"
     command: -config.file=/etc/loki/loki.yml
     volumes:
-      - ./config/loki/loki.yml:/etc/loki/loki.yml:ro
-      - ./config/loki/rules:/etc/loki/rules:ro
       - loki-data:/loki
     networks: [monitor]
     logging: *default-logging
@@ -115,13 +118,12 @@ services:
 
   # ── External uptime / TLS probing ──────────────────────────────────────────
   blackbox-exporter:
-    image: prom/blackbox-exporter:v0.28.0
+    build: ./config/blackbox
+    image: grafana-prometheus-loki/blackbox
     container_name: em-blackbox
     restart: unless-stopped
     command:
       - --config.file=/etc/blackbox/blackbox.yml
-    volumes:
-      - ./config/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
     networks: [monitor]
     logging: *default-logging
     healthcheck:
@@ -134,9 +136,8 @@ services:
   # Authenticates each client agent and stamps the Loki tenant from the
   # authenticated username, so a client cannot write into another's logs.
   ingest:
-    build:
-      context: ./config/ingest
-    image: grafana-prometheus-loki/ingest:1
+    build: ./config/ingest
+    image: grafana-prometheus-loki/ingest
     container_name: em-ingest
     restart: unless-stopped
     environment:
@@ -158,7 +159,8 @@ services:
 
   # ── Dashboards (one Org per client) ────────────────────────────────────────
   grafana:
-    image: grafana/grafana:13.1.4
+    build: ./config/grafana
+    image: grafana-prometheus-loki/grafana
     container_name: em-grafana
     restart: unless-stopped
     user: "472:472"
@@ -189,8 +191,6 @@ services:
       # Shared with the renderer. Grafana refuses to start with the default.
       GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?RENDERER_TOKEN is required}
     volumes:
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     networks: [monitor]
     logging: *default-logging

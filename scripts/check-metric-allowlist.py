@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Every metric a rule or dashboard queries must survive the agent's allowlists.
+"""Every metric a rule or dashboard queries must survive an allowlist.
 
 The agent only sends metrics its `keep` relabel rules name (agent/config.alloy,
-agent/databases.alloy). A panel or alert on anything else would quietly show
-no data or never fire, so this fails instead.
+agent/databases.alloy), and the central Prometheus keeps only listed metrics
+from the stack's own services (metric_relabel_configs in prometheus.yml). A
+panel or alert on anything else would quietly show no data or never fire, so
+this fails instead.
 
 Needs PyYAML; `make validate` runs it in the same throwaway container as the
 generator.
@@ -18,7 +20,9 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 # Scraped by the central Prometheus itself, not by any agent.
-CENTRAL = re.compile(r"^(prometheus|alertmanager|loki|probe|grafana|blackbox|net_conntrack)_")
+CENTRAL = re.compile(r"^(prometheus|alertmanager|loki|grafana|blackbox)_")
+# Blackbox probe results. The per-site jobs in scrape/ keep everything.
+PROBE = re.compile(r"^probe_")
 
 PROMQL_KEYWORDS = {
     "by", "without", "on", "ignoring", "group_left", "group_right",
@@ -35,6 +39,16 @@ def allowlists():
             patterns.append(re.compile(f"^(?:{m.group(1)})$"))
     if not patterns:
         sys.exit("no `keep` allowlists found in agent/*.alloy — has the format changed?")
+    return patterns
+
+
+def central_allowlists():
+    config = yaml.safe_load((ROOT / "config/prometheus/prometheus.yml").read_text())
+    patterns = []
+    for job in config.get("scrape_configs", []):
+        for rule in job.get("metric_relabel_configs", []):
+            if rule.get("action") == "keep" and rule.get("source_labels") == ["__name__"]:
+                patterns.append(re.compile(f"^(?:{rule['regex']})$"))
     return patterns
 
 
@@ -123,6 +137,7 @@ def queries():
 
 def main():
     keep = allowlists()
+    central = central_allowlists()
     problems, checked = [], set()
     items, records = queries()
     for where, expr in items:
@@ -136,13 +151,18 @@ def main():
             if ":" in name:
                 if name not in records:
                     problems.append(f"{where}: recording rule {name} is not defined")
-            elif not (CENTRAL.match(name) or any(p.match(name) for p in keep)):
-                problems.append(f"{where}: {name} is dropped by the agent's allowlist")
+            elif name == "up" or PROBE.match(name):
+                continue
+            elif CENTRAL.match(name):
+                if not any(p.match(name) for p in central):
+                    problems.append(f"{where}: {name} is dropped by metric_relabel_configs"
+                                    " in config/prometheus/prometheus.yml")
+            elif not any(p.match(name) for p in keep):
+                problems.append(f"{where}: {name} is dropped by the agent's allowlist"
+                                " (agent/config.alloy, or the engine's in agent/databases.alloy)")
     if problems:
-        sys.exit("metrics the agent never sends:\n  " + "\n  ".join(problems)
-                 + "\nAdd them to prometheus.relabel \"keep\" in agent/config.alloy"
-                   " (or the engine's allowlist in agent/databases.alloy).")
-    print(f"{len(checked)} metrics used by {len(items)} queries are all sent by the agent")
+        sys.exit("metrics that never reach Prometheus:\n  " + "\n  ".join(problems))
+    print(f"{len(checked)} metrics used by {len(items)} queries all reach Prometheus")
 
 
 if __name__ == "__main__":

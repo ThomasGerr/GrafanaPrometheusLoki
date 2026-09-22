@@ -135,6 +135,15 @@ for f in docker-compose.yml docker-compose.dev.yml agent/docker-compose.yml; do
   fi
 done
 
+# Dokploy builds these on every deploy; a Dockerfile that COPYs a file that
+# is not there should fail here, not on the server.
+step "Production images"
+if out=$(RENDERER_TOKEN=x docker compose -f docker-compose.yml build --quiet 2>&1); then
+  ok "every service in docker-compose.yml builds"
+else
+  bad "production image build"; echo "$out" | grep -v "level=warning" | tail -15 | sed 's/^/       /'
+fi
+
 # ── Dashboards ─────────────────────────────────────────────────────────────
 step "Grafana dashboards"
 for f in config/grafana/dashboards/*.json; do

@@ -516,6 +516,57 @@ Compaction is failing, which means retention has stopped working and the data
 directory will grow without bound. Nearly always disk pressure on the
 monitoring host itself.
 
+### MonitoringServiceDown
+
+Prometheus cannot scrape one of the stack's own services. What stops working
+depends on which one:
+
+- **alertmanager**: no alert emails at all. Every other alert is still
+  evaluated, but nobody hears about it.
+- **loki**: no logs are stored, the Logs and Security dashboards are empty,
+  and the security alerts are not evaluated.
+- **blackbox-exporter**: no uptime or certificate checks. Expect **SiteDown**
+  for every site at once.
+- **grafana**: nobody can see a dashboard. Alerting is unaffected.
+
+```bash
+docker ps -a --filter name=em-            # on the monitoring host
+docker logs --tail 50 em-<service>
+```
+
+A service that keeps restarting usually has a config it cannot parse after
+the last deploy: its log says which line. Roll back the commit and redeploy,
+then fix it with `make validate`, which would have caught it.
+
+### AlertsNotReachingAlertmanager
+
+Prometheus (metric alerts) or Loki (security alerts) is evaluating alerts but
+cannot hand them to Alertmanager. The alerts fire and are then lost, with no
+email and no record in Alertmanager. That makes this one of the few alerts
+that can arrive while everything else stays silent. Treat it as urgent.
+
+Usually Alertmanager is down or restarting (**MonitoringServiceDown** will be
+firing too), or it is rejecting what it receives. Check its log:
+`docker logs --tail 50 em-alertmanager`. If Alertmanager is up and healthy,
+look at the sender's log for the error: `docker logs em-prometheus` or
+`docker logs em-loki`, and search for `notify` or `alertmanager`.
+
+### LokiDiscardingLogs
+
+Loki rejected log lines from a tenant over the last 15 minutes. Those lines
+are gone for good. The agent does not retry them, and they will not turn up in
+a search. The `reason` label says why:
+
+- **rate_limited**, **per_stream_rate_limit** or **stream_limit**: the tenant
+  is sending more than the per-tenant limits in `config/loki/loki.yml` allow
+  (`ingestion_rate_mb`, `max_global_streams_per_user`). Usually one container
+  has started logging in a loop. Find it on the **Logs** dashboard and fix it
+  at the source. Raise the limit only if the volume is legitimate.
+- **greater_than_max_sample_age**: lines older than a week. The agent drops
+  its own backlog before sending, so this points at a host whose clock is
+  badly wrong (see **HostClockSkew**).
+- **line_too_long**: single lines over 256 KB, usually a dumped payload.
+
 ### NoClientDataAtAll
 
 Not one client host is reporting. This is not every client failing

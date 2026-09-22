@@ -127,6 +127,23 @@ whatever is in git, and a diff shows exactly what a client change did.
 
 `make validate` fails if the generated files are stale, so they cannot drift.
 
+### How config reaches the services
+
+In production the config is built into each service's image
+(`config/<service>/Dockerfile`: the pinned upstream image plus a `COPY`), not
+bind-mounted. Dokploy deploys with `docker compose up -d --build`, so every
+deploy rebuilds from the commit. An unchanged config is a build-cache hit,
+the image ID stays the same and the container keeps running. A changed one
+gets a new image and Compose recreates that container. So a deploy applies
+new alert rules, routes, security rules, dashboards, probe targets and the
+admin Org's tenant list, and restarts nothing else.
+
+Bind mounts cannot do that. Compose does not recreate a container whose
+definition is unchanged, and Prometheus, Alertmanager and Grafana's data
+source provisioning do not reload on their own, so a redeploy would leave
+them running the old config. The local stack (`docker-compose.dev.yml`) does
+bind-mount, so edits apply with `make reload` or a restart.
+
 ## Secrets
 
 No credential is ever written into the repo.

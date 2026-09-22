@@ -69,8 +69,10 @@ under the wrong client — or, more likely, rejects them.
 git add -A && git commit -m "add acme" && git push
 ```
 
-Redeploy in Dokploy. The new label proxy container starts, Prometheus picks up
-the new probe targets, and Alertmanager reloads its routing.
+Redeploy in Dokploy. The new label proxy container starts, and Prometheus,
+Alertmanager and Loki restart with the new probe targets, routing and security
+rules. Their config is baked into their images, so only the services whose
+config changed are restarted.
 
 ## 5. Install the agent on their servers
 

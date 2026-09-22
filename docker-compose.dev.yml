@@ -2,8 +2,10 @@
 # grafana-prometheus-loki — LOCAL DEVELOPMENT stack
 #
 # This is the file `make up` uses. It is a standalone copy of the production
-# stack with one difference: every service publishes a port on 127.0.0.1, so
-# you can open Grafana, Prometheus and Alertmanager in a browser directly.
+# stack with two differences: every service publishes a port on 127.0.0.1, so
+# you can open Grafana, Prometheus and Alertmanager in a browser directly, and
+# the config is bind-mounted from config/ instead of baked into images, so an
+# edit applies with `make reload` or a restart instead of a rebuild.
 #
 # Do NOT deploy this on a server. Dokploy uses docker-compose.yml, which
 # publishes nothing and routes through Traefik instead.
@@ -135,9 +137,8 @@ services:
   # Authenticates each client agent and stamps the Loki tenant from the
   # authenticated username, so a client cannot write into another's logs.
   ingest:
-    build:
-      context: ./config/ingest
-    image: grafana-prometheus-loki/ingest:1
+    build: ./config/ingest
+    image: grafana-prometheus-loki/ingest
     container_name: em-ingest
     restart: unless-stopped
     environment:
@@ -193,7 +194,7 @@ services:
       GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?RENDERER_TOKEN is required}
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"

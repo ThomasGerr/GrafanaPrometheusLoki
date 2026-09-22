@@ -76,6 +76,64 @@ groups:
           description: "Usually disk pressure on the monitoring host. Retention will stop working."
           runbook: "docs/alert-runbook.md#prometheustsdbcompactionfailing"
 
+      # The self-scrape jobs in prometheus.yml. Prometheus itself is not in
+      # the list: if it is down, nothing evaluates this rule.
+      - alert: MonitoringServiceDown
+        expr: up{job=~"alertmanager|loki|blackbox-exporter|grafana"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "Monitoring service {{ $labels.job }} is down"
+          description: >-
+            Prometheus cannot reach {{ $labels.job }} on the monitoring host.
+            Depending on which one, alerts, logs, uptime checks or dashboards
+            are not working.
+          runbook: "docs/alert-runbook.md#monitoringservicedown"
+
+      # Alerts that fire but never reach Alertmanager are the quietest
+      # failure there is: nothing downstream knows they existed. Prometheus
+      # evaluates the metric alerts, Loki's ruler the security alerts.
+      - alert: AlertsNotReachingAlertmanager
+        # Summed per metric: increase() drops the metric name, and errors and
+        # dropped carry identical labels, so one regex selector would collide.
+        expr: |
+          (
+            sum by (job) (increase(prometheus_notifications_errors_total[10m]))
+            + sum by (job) (increase(prometheus_notifications_dropped_total[10m]))
+          ) > 0
+          or
+          (
+            sum by (job) (increase(loki_prometheus_notifications_errors_total[10m]))
+            + sum by (job) (increase(loki_prometheus_notifications_dropped_total[10m]))
+          ) > 0
+        for: 5m
+        labels:
+          severity: critical
+          client: self
+        annotations:
+          summary: "{{ $labels.job }} cannot deliver alerts to Alertmanager"
+          description: >-
+            Alerts evaluated by {{ $labels.job }} are being lost before they
+            reach Alertmanager, so no email goes out for them.
+          runbook: "docs/alert-runbook.md#alertsnotreachingalertmanager"
+
+      # A tenant over its ingestion limits, or an agent sending lines Loki
+      # refuses, loses logs without any error reaching the agent's host.
+      - alert: LokiDiscardingLogs
+        expr: sum by (tenant, reason) (increase(loki_discarded_samples_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          client: self
+        annotations:
+          summary: "Loki is dropping logs from {{ $labels.tenant }} ({{ $labels.reason }})"
+          description: >-
+            {{ $value | printf "%.0f" }} log lines were rejected in 15 minutes.
+            Those lines are gone; searching for them will find nothing.
+          runbook: "docs/alert-runbook.md#lokidiscardinglogs"
+
       - alert: NoClientDataAtAll
         expr: |
           count(count by (client) (up{job="node", client!="self"})) == 0

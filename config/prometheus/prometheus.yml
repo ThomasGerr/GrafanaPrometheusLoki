@@ -27,27 +27,56 @@ scrape_configs:
   # The monitoring stack monitors itself. It carries client="self" so
   # your own infrastructure behaves like just another tenant in the
   # admin dashboards, while never leaking into a client's Org.
+  #
+  # Each job keeps only the metrics a rule in rules/meta.rules.yml reads.
+  # Unfiltered, these five were ~7,500 series — 87% of everything stored,
+  # Grafana alone ~4,000 — and nothing read them. `up` is added by the scrape
+  # itself and always kept; MonitoringServiceDown relies on it.
+  # scripts/check-metric-allowlist.py fails when a rule or panel needs a
+  # metric one of these drops.
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
         labels: { client: self, instance: monitor-host }
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: prometheus_(rule_evaluation_failures_total|config_last_reload_successful|tsdb_compactions_failed_total|notifications_(errors|dropped)_total)
+        action: keep
 
   - job_name: alertmanager
     static_configs:
       - targets: ["alertmanager:9093"]
         labels: { client: self, instance: monitor-host }
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: alertmanager_(notifications_failed_total|config_last_reload_successful)
+        action: keep
 
   - job_name: loki
     static_configs:
       - targets: ["loki:3100"]
         labels: { client: self, instance: monitor-host }
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: loki_(request_duration_seconds_count|discarded_samples_total|prometheus_notifications_(errors|dropped)_total)
+        action: keep
 
   - job_name: blackbox-exporter
     static_configs:
       - targets: ["blackbox-exporter:9115"]
         labels: { client: self, instance: monitor-host }
+    # The probe results come from the per-site jobs in scrape/, not from
+    # here. This job exists for `up` alone.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: blackbox_exporter_build_info
+        action: keep
 
   - job_name: grafana
     static_configs:
       - targets: ["grafana:3000"]
         labels: { client: self, instance: monitor-host }
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: grafana_build_info
+        action: keep

@@ -51,7 +51,15 @@ prometheus.exporter.unix "host" {
 prometheus.exporter.cadvisor "containers" {
   docker_host      = "unix:///var/run/docker.sock"
   docker_only      = true
-  storage_duration = "5m"
+  // cAdvisor's own in-memory history. Prometheus computes the rates, so the
+  // default two minutes (four scrapes) is plenty.
+  storage_duration = "2m"
+
+  // By default every Docker label becomes a container_label_* label on every
+  // series. On a Dokploy host that is ~20 Traefik and Compose labels, up to
+  // 2 KB, sent with every sample — and a redeploy that changes one starts a
+  // whole new set of series. Nothing queries them; name, image and id stay.
+  store_container_labels = false
 
   // An allowlist, not a denylist. `disabled_metrics` looks like the natural
   // choice here but panics Alloy v1.19.0 at startup on any value (nil deref

@@ -21,6 +21,8 @@ services:
       # Bound to loopback: the agent's own UI is for local debugging only.
       - --server.http.listen-addr=127.0.0.1:12345
       - --storage.path=/var/lib/alloy/data
+      # Otherwise Alloy reports which components it runs to Grafana Labs.
+      - --disable-reporting
       # A directory: Alloy loads every .alloy file in it as one config.
       - /etc/alloy
 

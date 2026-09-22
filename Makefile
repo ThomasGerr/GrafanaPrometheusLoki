@@ -67,7 +67,7 @@ logs: ## Follow logs (make logs S=prometheus for one service)
 	$(COMPOSE) logs -f --tail=100 $(S)
 
 .PHONY: reload
-reload: ## Apply config changes without restarting Prometheus
+reload: ## Local stack: apply config edits without restarting Prometheus
 	@docker exec em-prometheus wget -q --post-data='' -O- http://localhost:9090/-/reload \
 	  && echo "prometheus reloaded"
 	@$(COMPOSE) restart alertmanager && echo "alertmanager restarted"

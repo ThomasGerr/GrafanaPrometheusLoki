@@ -12,7 +12,10 @@ auth_enabled: true
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096
-  log_level: info
+  # warn, not info: at info Loki logs every ruler evaluation and query, about
+  # 55 MB a day with two tenants and growing with each one. The agent on the
+  # monitoring host ships these logs straight back into Loki.
+  log_level: warn
   # Log lines from a busy host can be long.
   grpc_server_max_recv_msg_size: 8388608
   grpc_server_max_send_msg_size: 8388608
@@ -85,8 +88,8 @@ compactor:
   delete_request_store: filesystem
 
 # Evaluates the security alerts. Rules are generated per tenant by
-# `make generate` into config/loki/rules/<id>/ and mounted read-only; the
-# ruler re-reads that directory every minute, so a redeploy is enough.
+# `make generate` into config/loki/rules/<id>/ and baked into the image, so
+# a redeploy after adding a client rebuilds and restarts Loki with them.
 ruler:
   alertmanager_url: http://alertmanager:9093
   enable_alertmanager_v2: true

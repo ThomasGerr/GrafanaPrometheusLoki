@@ -37,9 +37,9 @@ need to open a port on a client's firewall.
 | **Databases** | PostgreSQL/Supabase, MySQL/MariaDB, Redis, MongoDB, SQL Server: whether it is reachable, connection pool use, load, cache hit ratio, size, replication, deadlocks |
 | **Logs** | Container and system logs, searchable for 14 days |
 | **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups |
-| **Itself** | Broken alert rules, emails that failed to send, agents that stopped reporting |
+| **Itself** | Broken alert rules, alerts that never reach Alertmanager, emails that failed to send, stack services that stop, logs that Loki drops, agents that stopped reporting |
 
-47 alert rules come included. Each one has an entry in the
+50 alert rules come included. Each one has an entry in the
 [alert runbook](docs/alert-runbook.md) that explains what it means and what to
 check.
 
@@ -114,6 +114,10 @@ git commit -am "Set up self" && git push
    3000, and `ingest.example.com` to service `ingest`, port 8080. Point the
    DNS records at your server *first*, or the HTTPS certificate will fail.
 4. Click **Deploy**.
+
+Later changes need nothing more than a push and a redeploy. Each service's
+config is built into its image, so new alert rules, dashboards and website
+checks restart only the services they belong to.
 
 If the domains do not work, see
 [Networking on Dokploy](docs/architecture.md#networking-on-dokploy).
@@ -223,7 +227,7 @@ watching itself. `make down` stops it again.
 make help            # list every command
 make validate        # run before every commit
 make logs S=loki     # follow the logs of one service
-make reload          # apply config changes to Prometheus and Alertmanager
+make reload          # local stack: apply config edits to Prometheus and Alertmanager
 make routes C=acme   # show who gets an alert for acme
 make check-tenancy   # prove clients cannot see each other's data
 ```
