@@ -93,6 +93,11 @@ The installer refuses to finish quietly if the credentials are wrong: it starts
 the agent, waits, and reports a rejected login rather than leaving you to find
 out tomorrow.
 
+If the server runs databases, add a `--db` per database, now or later:
+`--db app=postgres://monitor:<password>@app-db:5432/app`. Create a read-only
+monitoring user first. [databases.md](databases.md) has the one-liner for
+each engine.
+
 Confirm the data arrived. Run this on the monitoring host — the stack
 publishes no ports, so the query goes through the container:
 

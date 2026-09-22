@@ -1,0 +1,286 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// grafana-prometheus-loki agent — database monitoring
+//
+// One custom component per engine. install.sh writes connections.alloy,
+// which instantiates one of these per `--db` flag:
+//
+//   database_postgres "main" {
+//     name        = "main"
+//     secret_file = "/etc/alloy-secrets/main"
+//     forward_to  = [prometheus.remote_write.central.receiver]
+//   }
+//
+// The connection string never appears in an .alloy file. It lives in a
+// root-only file that local.file reads as a secret, so it cannot show up in
+// the agent's UI or in its logs — and the agent's logs are shipped to Loki,
+// where the client can read them.
+//
+// Every component stamps the same three labels, which the central recording
+// rules (config/prometheus/rules/database.rules.yml) aggregate on:
+//   instance  this host, as everywhere else
+//   job       the engine: postgres, mysql, redis, mongodb, mssql
+//   db        the connection's name from `--db name=...`
+//
+// Each engine keeps an allowlist of metric names. The exporters produce
+// between 40 and 4,500 series per database, almost none of which anything
+// here queries; keeping them would cost 30 days of storage for nothing.
+// Add a name to the allowlist before using it in a rule or a panel.
+// ═══════════════════════════════════════════════════════════════════════════
+
+declare "database_postgres" {
+  argument "name"        { comment = "Connection name, becomes the db label" }
+  argument "secret_file" { comment = "File holding a postgres:// URL" }
+  argument "forward_to"  { comment = "Where to send the metrics" }
+
+  local.file "dsn" {
+    filename  = argument.secret_file.value
+    is_secret = true
+  }
+
+  prometheus.exporter.postgres "db" {
+    data_source_names = [local.file.dsn.content]
+  }
+
+  discovery.relabel "db" {
+    targets = prometheus.exporter.postgres.db.targets
+    rule {
+      target_label = "instance"
+      replacement  = sys.env("HOST_NAME")
+    }
+    rule {
+      target_label = "job"
+      replacement  = "postgres"
+    }
+    rule {
+      target_label = "db"
+      replacement  = argument.name.value
+    }
+  }
+
+  prometheus.scrape "db" {
+    targets         = discovery.relabel.db.output
+    forward_to      = [prometheus.relabel.db.receiver]
+    job_name        = "postgres"
+    scrape_interval = "30s"
+  }
+
+  prometheus.relabel "db" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "pg_up|pg_settings_max_connections|pg_stat_activity_count|pg_stat_activity_max_tx_duration|pg_database_size_bytes|pg_stat_database_(xact_commit|xact_rollback|blks_hit|blks_read|deadlocks|temp_bytes)|pg_replication_(lag_seconds|is_replica)|pg_locks_count"
+      action        = "keep"
+    }
+  }
+}
+
+declare "database_mysql" {
+  argument "name"        { comment = "Connection name, becomes the db label" }
+  argument "secret_file" { comment = "File holding a Go MySQL DSN: user:pass@tcp(host:3306)/" }
+  argument "forward_to"  { comment = "Where to send the metrics" }
+
+  local.file "dsn" {
+    filename  = argument.secret_file.value
+    is_secret = true
+  }
+
+  // Covers MariaDB as well; the exporter speaks the same protocol to both.
+  prometheus.exporter.mysql "db" {
+    data_source_name = local.file.dsn.content
+  }
+
+  discovery.relabel "db" {
+    targets = prometheus.exporter.mysql.db.targets
+    rule {
+      target_label = "instance"
+      replacement  = sys.env("HOST_NAME")
+    }
+    rule {
+      target_label = "job"
+      replacement  = "mysql"
+    }
+    rule {
+      target_label = "db"
+      replacement  = argument.name.value
+    }
+  }
+
+  prometheus.scrape "db" {
+    targets         = discovery.relabel.db.output
+    forward_to      = [prometheus.relabel.db.receiver]
+    job_name        = "mysql"
+    scrape_interval = "30s"
+  }
+
+  prometheus.relabel "db" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "mysql_up|mysql_version_info|mysql_global_status_(threads_connected|threads_running|questions|slow_queries|aborted_connects|innodb_buffer_pool_reads|innodb_buffer_pool_read_requests|innodb_row_lock_waits|uptime)|mysql_global_variables_(max_connections|innodb_buffer_pool_size)|mysql_slave_status_(seconds_behind_master|slave_io_running|slave_sql_running)"
+      action        = "keep"
+    }
+  }
+}
+
+declare "database_redis" {
+  argument "name"        { comment = "Connection name, becomes the db label" }
+  argument "address"     { comment = "redis://host:port or rediss://host:port, without credentials" }
+  argument "user"        {
+    comment  = "ACL user, empty for the default user"
+    optional = true
+    default  = ""
+  }
+  argument "secret_file" { comment = "File holding the password, empty when there is none" }
+  argument "forward_to"  { comment = "Where to send the metrics" }
+
+  // redis_addr is a plain string, not a secret, so the password travels
+  // separately. Putting it in the URL would print it in every connection
+  // error the exporter logs.
+  local.file "password" {
+    filename  = argument.secret_file.value
+    is_secret = true
+  }
+
+  prometheus.exporter.redis "db" {
+    redis_addr     = argument.address.value
+    redis_user     = argument.user.value
+    redis_password = local.file.password.content
+  }
+
+  discovery.relabel "db" {
+    targets = prometheus.exporter.redis.db.targets
+    rule {
+      target_label = "instance"
+      replacement  = sys.env("HOST_NAME")
+    }
+    rule {
+      target_label = "job"
+      replacement  = "redis"
+    }
+    rule {
+      target_label = "db"
+      replacement  = argument.name.value
+    }
+  }
+
+  prometheus.scrape "db" {
+    targets         = discovery.relabel.db.output
+    forward_to      = [prometheus.relabel.db.receiver]
+    job_name        = "redis"
+    scrape_interval = "30s"
+  }
+
+  prometheus.relabel "db" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "redis_(up|connected_clients|config_maxclients|blocked_clients|memory_used_bytes|memory_max_bytes|commands_processed_total|keyspace_hits_total|keyspace_misses_total|evicted_keys_total|rejected_connections_total|rdb_last_bgsave_status|uptime_in_seconds|db_keys)"
+      action        = "keep"
+    }
+  }
+}
+
+declare "database_mongodb" {
+  argument "name"        { comment = "Connection name, becomes the db label" }
+  argument "secret_file" { comment = "File holding a mongodb:// URI" }
+  argument "forward_to"  { comment = "Where to send the metrics" }
+
+  local.file "uri" {
+    filename  = argument.secret_file.value
+    is_secret = true
+  }
+
+  // Without the enable_* flags the exporter reports only mongodb_up, despite
+  // collect_all defaulting to true. The diagnostic data is where connections
+  // and operation counters come from; it is also ~4,500 series, which the
+  // allowlist below cuts back to a few dozen.
+  prometheus.exporter.mongodb "db" {
+    mongodb_uri              = local.file.uri.content
+    direct_connect           = true
+    enable_diagnostic_data   = true
+    enable_db_stats          = true
+    enable_replicaset_status = true
+  }
+
+  discovery.relabel "db" {
+    targets = prometheus.exporter.mongodb.db.targets
+    rule {
+      target_label = "instance"
+      replacement  = sys.env("HOST_NAME")
+    }
+    rule {
+      target_label = "job"
+      replacement  = "mongodb"
+    }
+    rule {
+      target_label = "db"
+      replacement  = argument.name.value
+    }
+  }
+
+  prometheus.scrape "db" {
+    targets         = discovery.relabel.db.output
+    forward_to      = [prometheus.relabel.db.receiver]
+    job_name        = "mongodb"
+    scrape_interval = "30s"
+  }
+
+  prometheus.relabel "db" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "mongodb_(up|connections|op_counters_total|memory|instance_uptime_seconds|asserts_total|dbstats_(dataSize|storageSize|indexSize))"
+      action        = "keep"
+    }
+  }
+}
+
+declare "database_mssql" {
+  argument "name"        { comment = "Connection name, becomes the db label" }
+  argument "secret_file" { comment = "File holding a sqlserver:// URL" }
+  argument "forward_to"  { comment = "Where to send the metrics" }
+
+  local.file "dsn" {
+    filename  = argument.secret_file.value
+    is_secret = true
+  }
+
+  prometheus.exporter.mssql "db" {
+    connection_string = local.file.dsn.content
+  }
+
+  discovery.relabel "db" {
+    targets = prometheus.exporter.mssql.db.targets
+    rule {
+      target_label = "instance"
+      replacement  = sys.env("HOST_NAME")
+    }
+    rule {
+      target_label = "job"
+      replacement  = "mssql"
+    }
+    rule {
+      target_label = "db"
+      replacement  = argument.name.value
+    }
+  }
+
+  prometheus.scrape "db" {
+    targets         = discovery.relabel.db.output
+    forward_to      = [prometheus.relabel.db.receiver]
+    job_name        = "mssql"
+    scrape_interval = "30s"
+  }
+
+  // This exporter has no mssql_up. When it cannot connect it still answers,
+  // with mssql_build_info alone, so the central `database_up` rule treats
+  // build_info without mssql_local_time_seconds as down. Keep both.
+  prometheus.relabel "db" {
+    forward_to = argument.forward_to.value
+    rule {
+      source_labels = ["__name__"]
+      regex         = "mssql_(build_info|local_time_seconds|connections|batch_requests_total|buffer_cache_hit_ratio|deadlocks_total|page_life_expectancy_seconds|user_errors_total|io_stall_seconds_total|resident_memory_bytes)"
+      action        = "keep"
+    }
+  }
+}

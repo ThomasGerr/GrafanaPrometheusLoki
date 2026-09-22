@@ -351,6 +351,133 @@ the install command to upgrade it.
 
 ---
 
+## Database alerts
+
+These cover the databases added to an agent with `--db`
+([docs/databases.md](databases.md)). `job` in the alert is the engine, `db`
+the name the connection was given. The **Databases** dashboard shows the
+history behind each one.
+
+### DatabaseDown
+
+The agent on that host cannot connect to the database. It covers three
+different situations, in rough order of likelihood:
+
+1. The database is down, or restarting.
+2. The monitoring user's password was changed, or the user was dropped.
+3. The network path changed: the database container moved to another Docker
+   network, or was recreated under a new name.
+
+The agent logs the exporter's exact error, with the password redacted:
+
+```bash
+ssh <host> 'docker logs --tail 200 grafana-prometheus-loki-agent 2>&1 | grep database_'
+```
+
+`password authentication failed` or `Login failed` is case 2: update the
+connection with `--db <name>=<new url>`. `no such host` or `connection refused`
+is case 3, or case 1 if the database container is not running
+(`docker ps -a`). If the application is healthy while this fires, the problem
+is the monitoring connection, not the database.
+
+### DatabaseConnectionsHigh
+
+More than 80% of the connection limit has been in use for 10 minutes. The
+usual causes are a connection leak in the application (connections opened and
+never returned), a pool size set higher than the database allows, or several
+application replicas that each open a full pool.
+
+Postgres shows who holds them:
+
+```sql
+SELECT usename, application_name, state, count(*)
+FROM pg_stat_activity GROUP BY 1, 2, 3 ORDER BY 4 DESC;
+```
+
+MySQL: `SHOW PROCESSLIST;`. Redis: `CLIENT LIST`. Many connections in `idle`
+from one application usually means a leak. For Postgres with many small
+clients, a pooler such as PgBouncer (built into Supabase as Supavisor) is the
+real fix. Raising `max_connections` costs memory for every connection.
+
+### DatabaseConnectionsExhausted
+
+Over 95%: new connections are about to be refused, and the application is
+likely already failing some requests. Handle it like
+**DatabaseConnectionsHigh**, but now. The quickest relief is restarting the
+application instance holding the most connections. For Postgres,
+`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle'
+AND state_change < now() - interval '10 minutes';` clears long-idle sessions.
+
+### DatabaseReplicationLag
+
+A Postgres or MySQL replica is more than five minutes behind its primary.
+Reads from the replica return stale data, and a failover now would lose that
+much.
+
+Common causes: a long-running query on the replica holding back replay
+(Postgres), a burst of writes on the primary such as a migration or bulk
+import, or a replica with slower disks than the primary. If the lag keeps
+growing instead of recovering, the replica cannot keep up and needs more
+resources or fewer queries.
+
+### DatabaseReplicationBroken
+
+The MySQL replica's IO or SQL thread has stopped. It is not merely behind:
+it is not replicating at all. `SHOW REPLICA STATUS\G` shows the error in
+`Last_IO_Error` or `Last_SQL_Error`. A duplicate-key error on the SQL thread
+means the replica's data has diverged. Skipping the event will get it running
+again, but the right fix is to rebuild the replica from a fresh copy.
+
+### DatabaseDeadlocks
+
+More than 5 deadlocks in 15 minutes. Each one is a transaction the database
+killed, which the application sees as an error or a retry.
+
+Deadlocks happen when two transactions lock the same rows in opposite order.
+The Postgres log (`docker logs <db container> | grep -A5 deadlock`) names both
+statements. The fix belongs in the application: touch rows in a consistent
+order, or keep transactions shorter. A sudden start right after a deploy
+points at that deploy.
+
+### DatabaseLongTransaction
+
+A Postgres transaction has been open for over an hour. While it is open,
+vacuum cannot clean up any row it might still need to see, so every table
+bloats, and it keeps holding its locks.
+
+```sql
+SELECT pid, usename, application_name, state, now() - xact_start AS age, query
+FROM pg_stat_activity WHERE xact_start IS NOT NULL ORDER BY age DESC LIMIT 5;
+```
+
+`idle in transaction` means an application opened a transaction and forgot
+it: a bug, and `pg_terminate_backend(pid)` is safe. `active` for hours is a
+huge report or migration. Check with whoever owns it before killing it.
+Setting `idle_in_transaction_session_timeout` prevents the forgotten kind.
+
+### RedisMemoryNearLimit
+
+Redis is above 90% of its `maxmemory`. What happens at 100% depends on
+`maxmemory-policy`: with `noeviction` (the default) writes start failing,
+and with an `allkeys-*` policy keys are silently evicted. That is fine for a
+cache, but not for a queue or a session store.
+
+`redis-cli INFO memory` and `redis-cli --bigkeys` show where the memory
+went. Keys written without a TTL are the usual cause.
+
+### RedisPersistenceFailing
+
+Redis's last background save to disk failed. By default Redis then refuses
+all writes (`stop-writes-on-bgsave-error`), so the application breaks in a
+way that looks unrelated. Even without that, a restart would lose everything
+written since the last good save.
+
+`redis-cli INFO persistence` and the Redis container's log give the reason.
+It is almost always a full disk (see **HostDiskSpaceLow**) or, on a busy
+instance, the fork failing for lack of memory.
+
+---
+
 ## Monitoring-stack alerts
 
 These go to you only. If one fires, treat every other alert as unreliable

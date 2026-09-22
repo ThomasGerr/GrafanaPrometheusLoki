@@ -34,11 +34,12 @@ need to open a port on a client's firewall.
 | **Servers** | CPU, memory, disk (including "will be full within 24h"), load, network, clock drift, reboots |
 | **Containers** | CPU and memory per container, restart loops, out-of-memory kills, containers that disappear |
 | **Websites** | Whether it is up, how fast it responds, HTTP status, when the TLS certificate expires |
+| **Databases** | PostgreSQL/Supabase, MySQL/MariaDB, Redis, MongoDB, SQL Server: whether it is reachable, connection pool use, load, cache hit ratio, size, replication, deadlocks |
 | **Logs** | Container and system logs, searchable for 14 days |
 | **Security** | SSH brute force, logins after failed attempts, root logins, failed `sudo`, new accounts, users added to admin groups |
 | **Itself** | Broken alert rules, emails that failed to send, agents that stopped reporting |
 
-38 alert rules come included. Each one has an entry in the
+47 alert rules come included. Each one has an entry in the
 [alert runbook](docs/alert-runbook.md) that explains what it means and what to
 check.
 
@@ -141,6 +142,10 @@ curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/ma
 Within a minute, the **Host Overview** dashboard shows the server. Running the
 same command again later upgrades the agent.
 
+The agent is light: measured on a server running 21 containers, it used about
+5% of one CPU core, 260 MiB of memory and 230 MB a day of upload, plus whatever
+its logs add. It only sends the metrics the alerts and dashboards use.
+
 The `NoClientDataAtAll` alert stays on until the agent of your first real
 client reports in. That is expected.
 
@@ -183,6 +188,23 @@ client reports in. That is expected.
 
 For more detail, including how to remove a client, see
 [docs/onboarding-a-client.md](docs/onboarding-a-client.md).
+
+## Monitoring databases
+
+To watch a database, add its connection URL when you install the agent on the
+server where it runs. On a server that already has the agent, this is the
+whole command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ThomasGerr/GrafanaPrometheusLoki/main/agent/install.sh \
+  | sudo bash -s -- --db app=postgres://monitor:<password>@app-db:5432/app
+```
+
+The host can be a container name; the agent joins its Docker network. The
+installer tests each connection before it finishes, and the password stays on
+that server. Nothing changes in `clients.yml`. Supported databases, how to
+create a read-only monitoring user, and the details:
+[docs/databases.md](docs/databases.md).
 
 ## Trying it on your own computer
 
@@ -264,7 +286,7 @@ config/                      Prometheus, Alertmanager, Loki, Grafana and ingest 
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: input for the Grafana setup
 scripts/                     generator, Grafana setup, checks
-docs/                        architecture, onboarding, alert runbook
+docs/                        architecture, onboarding, databases, alert runbook
 ```
 
 Generated files are committed to git, but never edit them by hand. Change

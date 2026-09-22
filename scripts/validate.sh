@@ -99,21 +99,35 @@ docker rm -f "$net" >/dev/null 2>&1
 docker network rm "$net" >/dev/null 2>&1
 
 # ── Alloy agent ────────────────────────────────────────────────────────────
+# On a host the agent loads config.alloy, databases.alloy and the
+# connections.alloy that install.sh writes, as one directory. Validate them
+# the same way, with a connection of every engine, so a wrong argument in a
+# database component fails here rather than on a client's server.
 step "Agent config"
-if out=$(docker run --rm -v "$PWD/agent:/a:ro" \
+agent_dir=$(mktemp -d)
+cp agent/config.alloy agent/databases.alloy "$agent_dir/"
+for engine in postgres mysql redis mongodb mssql; do
+  printf 'database_%s "db_%s" {\n  name = "%s"\n' "$engine" "$engine" "$engine"
+  [ "$engine" = redis ] && printf '  address = "redis://redis:6379"\n'
+  printf '  secret_file = "/dev/null"\n  forward_to = [prometheus.remote_write.central.receiver]\n}\n'
+done > "$agent_dir/connections.alloy"
+if out=$(docker run --rm -v "$agent_dir:/a:ro" \
           -e CLIENT_ID=validate -e HOST_NAME=validate \
           -e INGEST_URL=https://example.com -e INGEST_PASSWORD=x \
-          "$ALLOY_IMAGE" validate /a/config.alloy 2>&1); then
-  ok "agent/config.alloy"
+          "$ALLOY_IMAGE" validate /a 2>&1); then
+  ok "agent/config.alloy + databases.alloy (all five engines)"
 else
-  bad "agent/config.alloy"; echo "$out" | sed 's/^/       /'
+  bad "agent config"; echo "$out" | sed 's/^/       /'
 fi
+rm -rf "$agent_dir"
 
 # ── Compose ────────────────────────────────────────────────────────────────
 step "Docker Compose"
 for f in docker-compose.yml docker-compose.dev.yml agent/docker-compose.yml; do
   dir=$(dirname "$f"); base=$(basename "$f")
-  if out=$(cd "$dir" && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x \
+  # Dummy values for what the stack requires at start, so the check does not
+  # depend on a local .env (a fresh clone has none).
+  if out=$(cd "$dir" && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x RENDERER_TOKEN=x \
             docker compose -f "$base" config -q 2>&1); then
     ok "$f"
   else
@@ -154,6 +168,17 @@ if out=$(docker run --rm -v "$PWD:/w" -w /w python:3.13-slim sh -c \
   fi
 else
   bad "clients.yml"; echo "$out" | sed 's/^/       /'
+fi
+
+# ── Metric allowlist ───────────────────────────────────────────────────────
+# The agent drops every metric its allowlists do not name, so a rule or panel
+# on anything else would show nothing and alert on nothing, silently.
+step "Agent metric allowlist"
+if out=$(docker run --rm -v "$PWD:/w" -w /w python:3.13-slim sh -c \
+          "pip install --quiet --disable-pip-version-check pyyaml >/dev/null 2>&1 && python scripts/check-metric-allowlist.py" 2>&1); then
+  ok "$out"
+else
+  bad "metric allowlist"; echo "$out" | sed 's/^/       /'
 fi
 
 # -- Runbook links ----------------------------------------------------------

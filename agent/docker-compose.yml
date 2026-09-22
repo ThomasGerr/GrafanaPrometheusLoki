@@ -21,7 +21,8 @@ services:
       # Bound to loopback: the agent's own UI is for local debugging only.
       - --server.http.listen-addr=127.0.0.1:12345
       - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
+      # A directory: Alloy loads every .alloy file in it as one config.
+      - /etc/alloy
 
     environment:
       CLIENT_ID: ${CLIENT_ID:?CLIENT_ID is required}
@@ -29,8 +30,20 @@ services:
       INGEST_URL: ${INGEST_URL:?INGEST_URL is required}
       INGEST_PASSWORD: ${INGEST_PASSWORD:?INGEST_PASSWORD is required}
 
+    # Databases on this host that listen on its own loopback are reached
+    # through the Docker gateway. Harmless when there are none.
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
     volumes:
       - ./config.alloy:/etc/alloy/config.alloy:ro
+      # Database monitoring: the per-engine components, the connections
+      # install.sh wrote for this host, and their credentials (root-only).
+      # Databases running in other containers are reached by joining their
+      # networks, which install.sh adds in docker-compose.override.yml.
+      - ./databases.alloy:/etc/alloy/databases.alloy:ro
+      - ./connections.alloy:/etc/alloy/connections.alloy:ro
+      - ./db-secrets:/etc/alloy-secrets:ro
       # Write-ahead log. Metrics survive a central outage and replay on
       # reconnect, so a maintenance window leaves no gap in the graphs.
       - alloy-data:/var/lib/alloy/data

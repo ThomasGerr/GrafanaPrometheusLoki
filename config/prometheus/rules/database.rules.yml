@@ -1,0 +1,223 @@
+groups:
+  # Every engine reports the same things under different names. These rules
+  # translate them once into a shared set of `database:*` series, labelled
+  # (client, instance, job, db), so the alerts below and the Databases
+  # dashboard are written once instead of five times. `job` is the engine.
+  #
+  # The raw metrics come from agent/databases.alloy. A metric used here must
+  # be on that engine's allowlist there, or it never reaches Prometheus.
+  - name: database-recording
+    rules:
+      # MSSQL has no *_up metric. When it cannot log in, the exporter still
+      # answers with mssql_build_info alone, so "build_info present but no
+      # real data" is how down looks.
+      - record: database:up
+        expr: |
+          max by (client, instance, job, db) (pg_up)
+          or max by (client, instance, job, db) (mysql_up)
+          or max by (client, instance, job, db) (redis_up)
+          or max by (client, instance, job, db) (mongodb_up)
+          or max by (client, instance, job, db) (mssql_local_time_seconds > bool 0)
+          or max by (client, instance, job, db) (mssql_build_info) * 0
+
+      - record: database:connections
+        expr: |
+          sum by (client, instance, job, db) (pg_stat_activity_count)
+          or max by (client, instance, job, db) (mysql_global_status_threads_connected)
+          or max by (client, instance, job, db) (redis_connected_clients)
+          or max by (client, instance, job, db) (mongodb_connections{state="current"})
+          or sum by (client, instance, job, db) (mssql_connections)
+
+      # MSSQL is absent on purpose: its limit is 32,767 user connections by
+      # default and the exporter does not report the configured value.
+      - record: database:connections_max
+        expr: |
+          max by (client, instance, job, db) (pg_settings_max_connections)
+          or max by (client, instance, job, db) (mysql_global_variables_max_connections)
+          or max by (client, instance, job, db) (redis_config_maxclients)
+          or sum by (client, instance, job, db) (mongodb_connections{state=~"current|available"})
+
+      # Transactions for Postgres, statements for MySQL, commands for Redis,
+      # operations for MongoDB, batches for MSSQL. Not comparable across
+      # engines, but each is that engine's own measure of "how busy".
+      - record: database:operations:rate5m
+        expr: |
+          sum by (client, instance, job, db) (rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m]))
+          or sum by (client, instance, job, db) (rate(mysql_global_status_questions[5m]))
+          or sum by (client, instance, job, db) (rate(redis_commands_processed_total[5m]))
+          or sum by (client, instance, job, db) (rate(mongodb_op_counters_total[5m]))
+          or sum by (client, instance, job, db) (rate(mssql_batch_requests_total[5m]))
+
+      # Share of reads served from memory, 0–1. An idle database has no
+      # reads at all; the `> 0` guards make that no value rather than NaN.
+      - record: database:cache_hit_ratio:rate5m
+        expr: |
+          (
+            sum by (client, instance, job, db) (rate(pg_stat_database_blks_hit[5m]))
+            /
+            (sum by (client, instance, job, db) (rate(pg_stat_database_blks_hit[5m]) + rate(pg_stat_database_blks_read[5m])) > 0)
+          )
+          or (
+            1 - sum by (client, instance, job, db) (rate(mysql_global_status_innodb_buffer_pool_reads[5m]))
+            /
+            (sum by (client, instance, job, db) (rate(mysql_global_status_innodb_buffer_pool_read_requests[5m])) > 0)
+          )
+          or (
+            sum by (client, instance, job, db) (rate(redis_keyspace_hits_total[5m]))
+            /
+            (sum by (client, instance, job, db) (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) > 0)
+          )
+          or max by (client, instance, job, db) (mssql_buffer_cache_hit_ratio) / 100
+
+      # Postgres and MongoDB report data on disk; Redis reports memory, which
+      # is where its data lives. MySQL and MSSQL sizes need collectors that
+      # scan every table, which is too expensive to run every 30 seconds.
+      - record: database:size_bytes
+        expr: |
+          sum by (client, instance, job, db) (pg_database_size_bytes{datname!~"template[01]"})
+          or sum by (client, instance, job, db) (mongodb_dbstats_storageSize)
+          or max by (client, instance, job, db) (redis_memory_used_bytes)
+
+  - name: databases
+    rules:
+      - alert: DatabaseDown
+        expr: database:up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} database {{ $labels.db }} is unreachable on {{ $labels.instance }}"
+          description: >-
+            The agent on {{ $labels.instance }} cannot connect to {{ $labels.db }}.
+            Either the database is down, or its credentials or network path
+            changed.
+          runbook: "docs/alert-runbook.md#databasedown"
+
+      - alert: DatabaseConnectionsHigh
+        expr: |
+          database:connections / database:connections_max * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.db }} is using {{ $value | printf \"%.0f\" }}% of its connections on {{ $labels.instance }}"
+          description: >-
+            Over 80% of the {{ $labels.job }} connection limit has been in use for
+            10 minutes. New connections are refused once it reaches 100%.
+          runbook: "docs/alert-runbook.md#databaseconnectionshigh"
+
+      - alert: DatabaseConnectionsExhausted
+        expr: |
+          database:connections / database:connections_max * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.db }} is out of connections on {{ $labels.instance }}"
+          description: >-
+            {{ $value | printf "%.0f" }}% of the {{ $labels.job }} connection limit
+            is in use. The application is about to start failing requests, if it
+            has not already.
+          runbook: "docs/alert-runbook.md#databaseconnectionsexhausted"
+
+      # Postgres keeps reporting a lag on a primary; only a replica's counts.
+      - alert: DatabaseReplicationLag
+        expr: |
+          (
+            (
+              max by (client, instance, job, db) (pg_replication_lag_seconds)
+              and on (client, instance, job, db) max by (client, instance, job, db) (pg_replication_is_replica) == 1
+            )
+            or max by (client, instance, job, db) (mysql_slave_status_seconds_behind_master)
+          ) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replica {{ $labels.db }} is {{ $value | humanizeDuration }} behind on {{ $labels.instance }}"
+          description: >-
+            Reads from this replica return data that old, and a failover now
+            would lose it.
+          runbook: "docs/alert-runbook.md#databasereplicationlag"
+
+      # A stopped MySQL replica reports no lag at all, so the rule above
+      # cannot see it. Postgres has no equivalent signal from a replica. Both
+      # threads go in one selector: `or` between two metrics with identical
+      # labels would silently drop the second.
+      - alert: DatabaseReplicationBroken
+        expr: |
+          min by (client, instance, job, db) (
+            {__name__=~"mysql_slave_status_slave_(io|sql)_running"}
+          ) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replication has stopped on {{ $labels.db }} ({{ $labels.instance }})"
+          description: >-
+            The MySQL replica is no longer applying changes from its source. It
+            falls further behind every second until someone restarts it.
+          runbook: "docs/alert-runbook.md#databasereplicationbroken"
+
+      - alert: DatabaseDeadlocks
+        expr: |
+          (
+            sum by (client, instance, job, db) (increase(pg_stat_database_deadlocks[15m]))
+            or sum by (client, instance, job, db) (increase(mssql_deadlocks_total[15m]))
+          ) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} deadlocks in 15 minutes on {{ $labels.db }} ({{ $labels.instance }})"
+          description: >-
+            Transactions are killing each other. Each deadlock is a failed
+            request or a retry in the application.
+          runbook: "docs/alert-runbook.md#databasedeadlocks"
+
+      # Only transactions that are open: a long `idle` connection is normal,
+      # a long `idle in transaction` holds locks and blocks vacuum.
+      - alert: DatabaseLongTransaction
+        expr: |
+          max by (client, instance, job, db) (
+            pg_stat_activity_max_tx_duration{state=~"active|idle in transaction.*"}
+          ) > 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A transaction on {{ $labels.db }} has been open for {{ $value | humanizeDuration }} ({{ $labels.instance }})"
+          description: >-
+            A Postgres transaction open this long holds its locks and stops
+            vacuum from cleaning up, so tables bloat until it ends.
+          runbook: "docs/alert-runbook.md#databaselongtransaction"
+
+      # Only where a limit is set: redis_memory_max_bytes is 0 when maxmemory
+      # is unset, and Redis then grows until the host runs out.
+      - alert: RedisMemoryNearLimit
+        expr: |
+          max by (client, instance, job, db) (redis_memory_used_bytes)
+            / max by (client, instance, job, db) (redis_memory_max_bytes) * 100 > 90
+          and on (client, instance, job, db) max by (client, instance, job, db) (redis_memory_max_bytes) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis {{ $labels.db }} at {{ $value | printf \"%.0f\" }}% of maxmemory on {{ $labels.instance }}"
+          description: >-
+            Past the limit Redis either evicts keys or refuses writes, depending
+            on its maxmemory-policy.
+          runbook: "docs/alert-runbook.md#redismemorynearlimit"
+
+      - alert: RedisPersistenceFailing
+        expr: max by (client, instance, job, db) (redis_rdb_last_bgsave_status) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis {{ $labels.db }} cannot save to disk on {{ $labels.instance }}"
+          description: >-
+            The last background save failed. A restart now loses every write
+            since the last good save, and by default Redis refuses writes
+            until saving works again.
+          runbook: "docs/alert-runbook.md#redispersistencefailing"

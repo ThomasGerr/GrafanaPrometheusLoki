@@ -5,7 +5,8 @@
 // metrics, container logs and system logs, then pushes everything outbound
 // to the central stack over HTTPS. Nothing listens on a public port.
 //
-// Configured entirely through environment variables — see .env.
+// Configured entirely through environment variables — see .env. Database
+// monitoring lives next to this file in databases.alloy and connections.alloy.
 // ═══════════════════════════════════════════════════════════════════════════
 
 logging {
@@ -24,6 +25,13 @@ prometheus.exporter.unix "host" {
   rootfs_path = "/rootfs"
   procfs_path = "/rootfs/proc"
   sysfs_path  = "/rootfs/sys"
+
+  // Only the collectors something reads. The default set also runs NFS,
+  // ARP, conntrack, softnet and a dozen more, whose ~1,900 series per host
+  // no rule or panel uses — each one costs scrape time here and 30 days of
+  // storage centrally. Add a collector here, and its metrics to
+  // prometheus.relabel "keep" below, before querying anything new.
+  set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "stat", "time", "timex"]
 
   filesystem {
     // Docker's overlay mounts would otherwise appear as hundreds of
@@ -50,10 +58,15 @@ prometheus.exporter.cadvisor "containers" {
   // inside the vendored cAdvisor manager), so the allowlist is the working
   // form. It also keeps cardinality down, which is the point: the default set
   // includes per-CPU and per-process series that nothing here queries.
-  enabled_metrics = ["cpu", "memory", "diskIO", "disk", "network", "oom_event"]
+  //
+  // No "disk" or "diskIO": nothing queries per-container filesystem metrics,
+  // and collecting them makes cAdvisor walk every container's filesystem,
+  // which on a host with large images is real disk I/O for nothing.
+  enabled_metrics = ["cpu", "memory", "network", "oom_event"]
 }
 
-// Alloy's own health, so a half-broken agent is visible rather than silent.
+// Alloy's own health. Only `up` and the version leave the host (see
+// prometheus.relabel "keep"); the rest is there for the local UI.
 prometheus.exporter.self "agent" {}
 
 // Stamp the host identity onto every target. Without this the `instance`
@@ -103,23 +116,44 @@ discovery.relabel "agent_metrics" {
 // ("node", "cadvisor") — do not rename them without updating the rules.
 prometheus.scrape "host" {
   targets         = discovery.relabel.host_metrics.output
-  forward_to      = [prometheus.remote_write.central.receiver]
+  forward_to      = [prometheus.relabel.keep.receiver]
   job_name        = "node"
   scrape_interval = "30s"
 }
 
 prometheus.scrape "containers" {
   targets         = discovery.relabel.container_metrics.output
-  forward_to      = [prometheus.remote_write.central.receiver]
+  forward_to      = [prometheus.relabel.keep.receiver]
   job_name        = "cadvisor"
   scrape_interval = "30s"
 }
 
 prometheus.scrape "agent" {
   targets         = discovery.relabel.agent_metrics.output
-  forward_to      = [prometheus.remote_write.central.receiver]
+  forward_to      = [prometheus.relabel.keep.receiver]
   job_name        = "alloy"
   scrape_interval = "60s"
+}
+
+// Only metrics that a central rule or dashboard uses leave the host. The
+// exporters above still produce far more than that (cAdvisor's per-interface
+// packet and error counters alone are ~2,000 series on a busy host), and
+// unfiltered this agent sent ~6,400 series and ~1.2 GB a day, 87% of it
+// never read. `up` is the synthetic scrape-health series HostExporterFailing
+// needs. Database metrics bypass this: each database component in
+// databases.alloy keeps its own allowlist.
+//
+// Using a new metric in a rule or panel means adding it here first;
+// scripts/check-metric-allowlist.py (part of `make validate`) fails until
+// you do.
+prometheus.relabel "keep" {
+  forward_to = [prometheus.remote_write.central.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "up|alloy_build_info|node_(boot_time_seconds|cpu_seconds_total|disk_(read|written)_bytes_total|filesystem_(avail_bytes|files|files_free|readonly|size_bytes)|load1|load5|load15|memory_(Buffers|Cached|MemAvailable|MemTotal|SwapFree|SwapTotal)_bytes|network_(receive|transmit)_bytes_total|time_seconds|timex_offset_seconds)|container_(cpu_usage_seconds_total|last_seen|memory_working_set_bytes|network_(receive|transmit)_bytes_total|oom_events_total|spec_memory_limit_bytes|start_time_seconds)"
+    action        = "keep"
+  }
 }
 
 prometheus.remote_write "central" {
@@ -266,6 +300,15 @@ loki.process "enrich" {
   stage.drop {
     older_than          = "167h"
     drop_counter_reason = "older_than_loki_window"
+  }
+
+  // prometheus.exporter.mongodb on MongoDB 8 collects the opLatencies
+  // histograms twice and logs 64 errors per scrape saying so — about 180,000
+  // lines a day per database, in the agent's own log, which the client can
+  // read. The metrics themselves still arrive. Drop exactly this message.
+  stage.drop {
+    expression          = "mongodb_ss_opLatencies_.*was collected before with the same name and label values"
+    drop_counter_reason = "mongodb_exporter_duplicate_metric"
   }
 
   // Health-check chatter is the single largest source of useless log volume

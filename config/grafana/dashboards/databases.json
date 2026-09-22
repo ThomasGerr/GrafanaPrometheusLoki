@@ -1,0 +1,1215 @@
+{
+  "uid": "em-databases",
+  "title": "Databases",
+  "description": "Postgres, MySQL/MariaDB, Redis, MongoDB and MSSQL connections monitored by the agents: reachability, connection use, load, cache efficiency and trouble.",
+  "tags": [
+    "grafana-prometheus-loki"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "1h"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "client",
+        "label": "Client",
+        "description": "Your Org only ever shows your own environment.",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(database:up, client)",
+          "refId": "clientVar"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "instance",
+        "label": "Host",
+        "description": "",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(database:up{client=~\"$client\"}, instance)",
+          "refId": "instanceVar"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "options": [],
+        "hide": 0,
+        "allValue": ".*"
+      },
+      {
+        "name": "db",
+        "label": "Database",
+        "description": "",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(database:up{client=~\"$client\", instance=~\"$instance\"}, db)",
+          "refId": "dbVar"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "options": [],
+        "hide": 0,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Databases",
+      "description": "Database connections the agents on these hosts are monitoring.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "count(database:up{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Unreachable",
+      "description": "Databases the agent cannot connect to right now.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 5,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "count(database:up{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} == 0) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Busiest connection pool",
+      "description": "The highest share of its connection limit any one database is using. MSSQL is not included: it does not report its limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(database:connections{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} / database:connections_max{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}) * 100",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Deadlocks (24h)",
+      "description": "Postgres and MSSQL. Each one is a transaction the database killed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase({__name__=~\"pg_stat_database_deadlocks|mssql_deadlocks_total\", client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}[24h])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Stored data",
+      "description": "Postgres and MongoDB on disk, Redis in memory. MySQL and MSSQL are not measured.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(database:size_bytes{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "All databases",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Databases",
+      "description": "One row per monitored connection. Engine-specific measures: operations are transactions (Postgres), statements (MySQL), commands (Redis), operations (MongoDB) or batches (MSSQL).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (client, instance, job, db) (database:up{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "database:connections{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} / database:connections_max{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} * 100",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (client, instance, job, db) (database:connections{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "C",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (client, instance, job, db) (database:operations:rate5m{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "D",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (client, instance, job, db) (database:cache_hit_ratio:rate5m{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "E",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (client, instance, job, db) (database:size_bytes{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "F",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "client": true
+            },
+            "indexByName": {
+              "db": 0,
+              "job": 1,
+              "instance": 2,
+              "Value #A": 3,
+              "Value #B": 4,
+              "Value #C": 5,
+              "Value #D": 6,
+              "Value #E": 7,
+              "Value #F": 8
+            },
+            "renameByName": {
+              "db": "Database",
+              "job": "Engine",
+              "instance": "Host",
+              "Value #A": "Status",
+              "Value #B": "Connections used",
+              "Value #C": "Connections",
+              "Value #D": "Operations/s",
+              "Value #E": "Cache hit ratio",
+              "Value #F": "Size"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Status"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Unreachable",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Up",
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Connections used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 80
+                    },
+                    {
+                      "color": "red",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Operations/s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cache hit ratio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Size"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Load",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Connections used",
+      "description": "Share of each database's connection limit in use. New connections are refused at 100%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "database:connections{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} / database:connections_max{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"} * 100",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Operations per second",
+      "description": "Each engine's own measure of work done; compare a database with its own past, not with another engine.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "database:operations:rate5m{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Cache hit ratio",
+      "description": "Share of reads served from memory. A drop means the working set no longer fits in RAM, and reads go to disk. Idle databases show no line.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "database:cache_hit_ratio:rate5m{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Stored data",
+      "description": "Postgres and MongoDB on disk, Redis in memory.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "database:size_bytes{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Problems",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Deadlocks",
+      "description": "Per 15 minutes, Postgres and MSSQL. More than 5 raises DatabaseDeadlocks.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (db, instance) (increase({__name__=~\"pg_stat_database_deadlocks|mssql_deadlocks_total\", client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}[15m]))",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Longest open transaction",
+      "description": "Postgres. An hour or more raises DatabaseLongTransaction: it holds locks and blocks vacuum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (db, instance) (pg_stat_activity_max_tx_duration{state=~\"active|idle in transaction.*\", client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Replication lag",
+      "description": "Replicas only, Postgres and MySQL. Empty when no monitored database is a replica.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (db, instance) (pg_replication_lag_seconds{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}) and on (db, instance) max by (db, instance) (pg_replication_is_replica{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}) == 1",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (db, instance) (mysql_slave_status_seconds_behind_master{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"})",
+          "refId": "B",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Redis memory vs maxmemory",
+      "description": "Only Redis instances with a maxmemory limit. Past 100% Redis evicts keys or refuses writes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (db, instance) (redis_memory_used_bytes{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}) / (max by (db, instance) (redis_memory_max_bytes{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}) > 0) * 100",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          },
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "MySQL slow queries",
+      "description": "Queries slower than long_query_time (10 s by default) per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (db, instance) (rate(mysql_global_status_slow_queries{client=~\"$client\", instance=~\"$instance\", db=~\"$db\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{db}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}
