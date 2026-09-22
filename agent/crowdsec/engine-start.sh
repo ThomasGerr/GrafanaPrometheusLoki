@@ -58,7 +58,7 @@ EOF
     log "no systemd journal mounted: SSH attacks will not be detected"
   fi
   cat <<'EOF'
-# Reverse proxies logging to stdout, by container name.
+# Web servers and reverse proxies logging to stdout, by container name.
 source: docker
 container_name_regexp:
   - "(?i)traefik"
@@ -70,7 +70,23 @@ container_name_regexp:
   - "(?i)nginx"
 labels:
   type: nginx
+---
+source: docker
+container_name_regexp:
+  - "(?i)apache"
+  - "(?i)httpd"
+labels:
+  type: apache2
 EOF
+  # A web server installed on the host, logging to files.
+  for dir in apache2 httpd; do
+    if compgen -G "/var/log/host/$dir/*access*log*" >/dev/null; then
+      printf -- '---\nsource: file\nfilenames:\n  - /var/log/host/%s/*access*log*\n  - /var/log/host/%s/*error*log*\nlabels:\n  type: apache2\n' "$dir" "$dir"
+    fi
+  done
+  if compgen -G "/var/log/host/nginx/*access*log*" >/dev/null; then
+    printf -- '---\nsource: file\nfilenames:\n  - /var/log/host/nginx/*access*log*\n  - /var/log/host/nginx/*error*log*\nlabels:\n  type: nginx\n'
+  fi
   if [[ -f /var/log/traefik/access.log ]]; then
     cat <<'EOF'
 ---

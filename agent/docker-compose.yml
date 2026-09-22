@@ -113,7 +113,8 @@ services:
     environment:
       COLLECTIONS: >-
         crowdsecurity/linux crowdsecurity/sshd crowdsecurity/traefik
-        crowdsecurity/nginx crowdsecurity/whitelist-good-actors
+        crowdsecurity/nginx crowdsecurity/apache2
+        crowdsecurity/whitelist-good-actors
       # The image registers a bouncer for every BOUNCER_KEY_<name> variable,
       # so this is the bouncer "firewall" below. (Any variable containing
       # BOUNCER_KEY counts, hence not CROWDSEC_BOUNCER_KEY here.) Required
@@ -132,6 +133,9 @@ services:
       - ${JOURNAL_DIR:-/var/log/journal}:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # A web server installed on the host rather than in a container logs
+      # here: /var/log/apache2, /var/log/httpd, /var/log/nginx.
+      - /var/log:/var/log/host:ro
       # Dokploy's Traefik writes its access log to a file, not stdout. Set
       # CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic on a Dokploy host.
       - ${CROWDSEC_TRAEFIK_DIR:-./crowdsec/no-traefik}:/var/log/traefik:ro

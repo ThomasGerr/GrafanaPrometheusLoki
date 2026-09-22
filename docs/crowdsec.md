@@ -36,11 +36,15 @@ The installer also checks it before it finishes:
 - **Detects** attacks in:
   - sshd, from the system journal: brute force, slow brute force, known
     exploits.
-  - Traefik and nginx: vulnerability scanners, WordPress and admin-panel
-    probing, path traversal, known CVE exploits. It reads containers whose
-    name contains `traefik` or `nginx`, and, with
-    `CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic`, Dokploy's Traefik
-    access log. The installer sets that for you on a Dokploy host.
+  - Web servers: vulnerability scanners, WordPress and admin-panel probing,
+    path traversal, SQL injection and XSS probing, brute force against login
+    pages that answer 401 or 403, and around 30 known CVE exploits. It reads:
+    - containers whose name contains `traefik`, `nginx`, `apache` or `httpd`;
+    - a web server installed on the host, from `/var/log/apache2`,
+      `/var/log/httpd` and `/var/log/nginx`;
+    - Dokploy's Traefik access log, with
+      `CROWDSEC_TRAEFIK_DIR=/etc/dokploy/traefik/dynamic`. The installer sets
+      that for you on a Dokploy host.
 - **Blocks** each attacker for four hours in the server's firewall
   (nftables). That covers SSH, the websites and everything else, including
   ports Docker publishes. Repeat offenders are banned again.
@@ -144,6 +148,10 @@ For whoever maintains this repo:
     17 MB. It runs in the host's network with `NET_ADMIN`, and hooks nftables'
     `input` and `forward`. The second is what makes bans hold for
     Docker-published ports, which bypass the host's `input` chain.
+- The collections installed are `linux`, `sshd`, `traefik`, `nginx`,
+  `apache2` and `whitelist-good-actors`. Another web server (Caddy, HAProxy)
+  needs its collection added to `COLLECTIONS` and its logs to the sources in
+  `engine-start.sh`.
 - `engine-start.sh`, at every start: writes which logs to read, registers with
   the central API itself (the image's own start script exits when that fails,
   which would leave a host unprotected because *sharing* failed), and once
