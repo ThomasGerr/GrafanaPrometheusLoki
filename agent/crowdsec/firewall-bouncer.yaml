@@ -34,3 +34,14 @@ nftables:
 nftables_hooks:
   - input
   - forward
+
+# How much it blocks: dropped packets and bytes per ban source, for the
+# CrowdSec dashboard. The bouncer runs in the host's network, so it listens
+# on host.docker.internal: the host's Docker bridge address (docker0,
+# usually 172.17.0.1). The agent's containers reach the host there, and it is
+# not a public interface. Where that address is not local (Docker Desktop),
+# the bouncer logs a bind error and keeps blocking; only the counts are lost.
+prometheus:
+  enabled: true
+  listen_addr: host.docker.internal
+  listen_port: 60601

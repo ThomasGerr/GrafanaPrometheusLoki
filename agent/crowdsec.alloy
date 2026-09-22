@@ -9,7 +9,8 @@
 //   }
 //
 // The engine runs as the `crowdsec` service on the agent's Compose network
-// and serves its metrics on port 6060. The central rules in
+// and serves its metrics on port 6060. The firewall bouncer runs in the
+// host's network and serves how much it dropped on host.docker.internal:60601. The central rules in
 // config/prometheus/rules/crowdsec.rules.yml and the CrowdSec dashboard read
 // them; like everywhere else in the agent, only the metrics those use are
 // kept. Add a name to the allowlist before using it in a rule or a panel.
@@ -29,11 +30,22 @@ declare "crowdsec_metrics" {
     scrape_interval = "30s"
   }
 
+  prometheus.scrape "bouncer" {
+    targets = [{
+      "__address__" = "host.docker.internal:60601",
+      "instance"    = sys.env("HOST_NAME"),
+      "job"         = "crowdsec-bouncer",
+    }]
+    forward_to      = [prometheus.relabel.crowdsec.receiver]
+    job_name        = "crowdsec-bouncer"
+    scrape_interval = "30s"
+  }
+
   prometheus.relabel "crowdsec" {
     forward_to = argument.forward_to.value
     rule {
       source_labels = ["__name__"]
-      regex         = "up|cs_(info|active_decisions|alerts|lapi_bouncer_requests_total|(docker|journalctl|file)source_hits_total|parser_hits_(ok_)?total)"
+      regex         = "up|cs_(info|active_decisions|alerts|lapi_bouncer_requests_total|(docker|journalctl|file)source_hits_total|parser_hits_(ok_)?total)|fw_bouncer_(dropped_packets|dropped_bytes|processed_packets|banned_ips)"
       action        = "keep"
     }
   }

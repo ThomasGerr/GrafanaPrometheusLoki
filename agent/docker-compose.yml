@@ -156,6 +156,9 @@ services:
     restart: unless-stopped
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW]
+    # Its metrics listen on this address; see crowdsec/firewall-bouncer.yaml.
+    extra_hosts:
+      - host.docker.internal:host-gateway
     environment:
       CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
       CROWDSEC_LAPI_PORT: ${CROWDSEC_LAPI_PORT:-8089}

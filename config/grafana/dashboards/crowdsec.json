@@ -367,7 +367,7 @@
     {
       "id": 6,
       "type": "row",
-      "title": "Attacks",
+      "title": "What the bans stopped",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -379,6 +379,300 @@
     },
     {
       "id": 7,
+      "type": "stat",
+      "title": "Packets blocked",
+      "description": "Packets the firewall dropped because they came from a banned address, in the time range. A blocked connection attempt is usually one to a few packets: the attacker's system retries before giving up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(fw_bouncer_dropped_packets{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}[$__range])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Data blocked",
+      "description": "The size of those dropped packets.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(fw_bouncer_dropped_bytes{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}[$__range])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Share of traffic blocked",
+      "description": "Blocked packets as a share of all packets the firewall saw.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(fw_bouncer_dropped_packets{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}[$__range])) / sum(increase(fw_bouncer_processed_packets{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}[$__range]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Addresses in the firewall",
+      "description": "Banned addresses currently in the firewall's block lists, including the community blocklist.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(fw_bouncer_banned_ips{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Blocked packets per minute, by reason",
+      "description": "Detected here: attackers this host caught itself. Community blocklist: addresses already known to attack others, blocked before they tried anything here. Manual ban: set with cscli.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(label_replace(label_replace(label_replace(sum by (origin) (rate(fw_bouncer_dropped_packets{job=\"crowdsec-bouncer\", client=~\"$client\", instance=~\"$instance\"}[5m])) * 60, \"source\", \"Detected here\", \"origin\", \"crowdsec\"), \"source\", \"Community blocklist\", \"origin\", \"CAPI\"), \"source\", \"Manual ban\", \"origin\", \"cscli\"), \"source\", \"Blocklist $1\", \"origin\", \"lists:(.*)\")",
+          "refId": "A",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "gradientMode": "opacity",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Attacks",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
       "type": "timeseries",
       "title": "Active bans by scenario",
       "description": "What these hosts detected and banned, by the attack that triggered it. A ban lasts four hours by default.",
@@ -388,7 +682,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 18,
         "w": 12,
         "h": 9
       },
@@ -435,7 +729,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 14,
       "type": "timeseries",
       "title": "Active bans by source",
       "description": "crowdsec: this host's own detection. cscli: set by hand. CAPI and lists: the community blocklist.",
@@ -445,7 +739,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 18,
         "w": 12,
         "h": 9
       },
@@ -488,7 +782,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 15,
       "type": "logs",
       "title": "Recent bans",
       "datasource": {
@@ -498,7 +792,7 @@
       "description": "Every ban CrowdSec issued, newest first: the address, the scenario and how long.",
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 27,
         "w": 24,
         "h": 9
       },
@@ -522,20 +816,20 @@
       }
     },
     {
-      "id": 10,
+      "id": 16,
       "type": "row",
       "title": "Health",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 36,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 11,
+      "id": 17,
       "type": "timeseries",
       "title": "Log lines read per second",
       "description": "Per source. A source that drops to zero while its service is busy has come loose.",
@@ -545,7 +839,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 37,
         "w": 12,
         "h": 8
       },
@@ -606,7 +900,7 @@
       }
     },
     {
-      "id": 12,
+      "id": 18,
       "type": "timeseries",
       "title": "Bouncer decision fetches per minute",
       "description": "The firewall bouncer asks for new decisions every 10 seconds, so about 6 per minute. Zero means nothing is being blocked.",
@@ -616,7 +910,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 37,
         "w": 12,
         "h": 8
       },

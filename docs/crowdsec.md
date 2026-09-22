@@ -74,8 +74,12 @@ rebuilds the firewall rules from scratch.
 
 ## Seeing what it does
 
-- **The CrowdSec dashboard**, in every Org: protected hosts, who is banned
-  and why, a live list of bans, and whether each host is actually blocking.
+- **The CrowdSec dashboard**, in every Org: protected hosts, what the bans
+  stopped (packets and data dropped, the share of all traffic, per reason:
+  detected here, community blocklist, manual), who is banned and why, a live
+  list of bans, and whether each host is actually blocking. Blocked traffic
+  is counted in packets, not requests: one blocked connection attempt is
+  usually a packet or a few, as the attacker's system retries.
 - **Alerts**: **CrowdSecDown**, **CrowdSecBouncerNotBlocking** (detecting,
   but the firewall is not enforcing, the failure that looks like protection)
   and **CrowdSecNotReadingLogs**. See the
@@ -151,8 +155,15 @@ For whoever maintains this repo:
 - The key reaches the engine as `BOUNCER_KEY_firewall`. The image registers
   a bouncer for every variable whose name contains `BOUNCER_KEY`, so passing
   `CROWDSEC_BOUNCER_KEY` itself would register one called "KEY".
-- `agent/crowdsec.alloy` collects CrowdSec's metrics, with an allowlist like
-  the rest of the agent. The agent's start-up instantiates it only when
+- `agent/crowdsec.alloy` collects CrowdSec's metrics and the bouncer's
+  dropped-packet counters, with an allowlist like the rest of the agent. The
+  bouncer serves those on `host.docker.internal:60601`: it runs in the host's
+  network, and that address is the host's Docker bridge (`docker0`),
+  reachable from the agent's containers but not a public interface. Where it
+  is not a local address (Docker Desktop), the bouncer logs a bind error and
+  keeps blocking; only the counts are missing. CrowdSec's own "usage
+  metrics" from bouncers are not used: they reach the engine only every 15
+  minutes and are not on its Prometheus endpoint. The agent's start-up instantiates it only when
   `COMPOSE_PROFILES` contains `crowdsec`.
 - Footprint when on: roughly 100–150 MiB for the engine and 10 MiB for the
   bouncer.
