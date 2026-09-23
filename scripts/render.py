@@ -79,7 +79,7 @@ def all_value_vars(dashboard_uid: str) -> dict[str, str]:
     render with nothing selected picks whatever Grafana lists first. Ask for
     All explicitly so an image covers every host, not an arbitrary one.
     """
-    for path in DASHBOARD_DIR.glob("*.json"):
+    for path in DASHBOARD_DIR.glob("*/*.json"):
         dash = json.loads(path.read_text())
         if dash.get("uid") == dashboard_uid:
             return {
@@ -94,7 +94,7 @@ def render(grafana: str, auth: str, path: str, params: dict[str, str]) -> bytes:
     url = f"{grafana}{path}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={
         "Authorization": auth,
-        "User-Agent": "grafana-prometheus-loki-render/1",
+        "User-Agent": "ethic-monitor-render/1",
     })
     try:
         # Grafana waits for the renderer, which waits for every query in the

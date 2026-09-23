@@ -768,111 +768,99 @@
             "disableIf": ""
           },
           {
-            "uid": "machine",
-            "id": "machine",
-            "title": "Machine",
-            "type": "boolean",
-            "value": false,
+            "uid": "type",
+            "id": "type",
+            "title": "Type",
+            "type": "select",
+            "value": "directory",
             "labelWidth": 16,
             "width": 0,
-            "tooltip": "Back up the whole filesystem, minus the obvious throwaways.",
+            "tooltip": "What this schedule backs up. Machine is the whole filesystem, minus the obvious throwaways.",
             "section": "",
             "unit": "",
             "showIf": "",
-            "disableIf": ""
+            "disableIf": "",
+            "optionsSource": "Custom",
+            "options": [
+              {
+                "id": "machine",
+                "value": "machine",
+                "label": "Machine"
+              },
+              {
+                "id": "directory",
+                "value": "directory",
+                "label": "Directory"
+              },
+              {
+                "id": "volume",
+                "value": "volume",
+                "label": "Volume"
+              },
+              {
+                "id": "database",
+                "value": "database",
+                "label": "Database"
+              }
+            ]
           },
           {
             "uid": "paths",
             "id": "paths",
-            "title": "Paths",
-            "type": "textarea",
+            "title": "Directory",
+            "type": "string",
             "value": "",
             "labelWidth": 16,
             "width": 0,
-            "tooltip": "One absolute path per line, e.g. /etc/nginx",
+            "tooltip": "An absolute path, e.g. /etc/nginx. Several, separated by commas.",
             "section": "",
             "unit": "",
-            "showIf": "",
-            "disableIf": "",
-            "rows": 3
+            "showIf": "const t = context.panel.elements.find((e) => e.id === 'type');\nreturn !!t && t.value === 'directory';",
+            "disableIf": ""
           },
           {
             "uid": "volumes",
             "id": "volumes",
-            "title": "Volumes",
-            "type": "textarea",
+            "title": "Volume",
+            "type": "string",
             "value": "",
             "labelWidth": 16,
             "width": 0,
-            "tooltip": "One Docker volume name per line.",
+            "tooltip": "A Docker volume name. Several, separated by commas.",
             "section": "",
             "unit": "",
-            "showIf": "",
-            "disableIf": "",
-            "rows": 2
+            "showIf": "const t = context.panel.elements.find((e) => e.id === 'type');\nreturn !!t && t.value === 'volume';",
+            "disableIf": ""
           },
           {
             "uid": "databases",
             "id": "databases",
-            "title": "Databases",
-            "type": "textarea",
+            "title": "Database",
+            "type": "string",
             "value": "",
             "labelWidth": 16,
             "width": 0,
-            "tooltip": "One name per line, matching a DB_<NAME> variable on the agent.",
+            "tooltip": "A name matching a DB_<NAME> variable on the agent. Several, separated by commas.",
             "section": "",
             "unit": "",
-            "showIf": "",
-            "disableIf": "",
-            "rows": 2
+            "showIf": "const t = context.panel.elements.find((e) => e.id === 'type');\nreturn !!t && t.value === 'database';",
+            "disableIf": ""
           },
           {
-            "uid": "keep_daily",
-            "id": "keep_daily",
-            "title": "Keep daily",
+            "uid": "keep",
+            "id": "keep",
+            "title": "Keep",
             "type": "number",
             "value": 7,
             "labelWidth": 16,
             "width": 0,
-            "tooltip": "",
+            "tooltip": "How many backups to keep. The cron line above says how often one is made, so 7 daily backups is a week.",
             "section": "",
             "unit": "",
             "showIf": "",
             "disableIf": "",
-            "min": 0,
-            "max": 365
-          },
-          {
-            "uid": "keep_weekly",
-            "id": "keep_weekly",
-            "title": "Keep weekly",
-            "type": "number",
-            "value": 4,
-            "labelWidth": 16,
-            "width": 0,
-            "tooltip": "",
-            "section": "",
-            "unit": "",
-            "showIf": "",
-            "disableIf": "",
-            "min": 0,
-            "max": 520
-          },
-          {
-            "uid": "keep_monthly",
-            "id": "keep_monthly",
-            "title": "Keep monthly",
-            "type": "number",
-            "value": 6,
-            "labelWidth": 16,
-            "width": 0,
-            "tooltip": "",
-            "section": "",
-            "unit": "",
-            "showIf": "",
-            "disableIf": "",
-            "min": 0,
-            "max": 120
+            "min": 1,
+            "max": 999
           }
         ],
         "initial": {
@@ -885,7 +873,7 @@
         "update": {
           "method": "datasource",
           "datasource": "backups",
-          "getPayload": "\nconst v = {};\ncontext.panel.elements.forEach((e) => { v[e.id] = e.value; });\n// One item per line in the box, comma-separated on the way out.\nconst list = (s) => (s || '').split('\\n').map((x) => x.trim()).filter((x) => x.length).join(',');\nreturn {\n  client: v.client,\n  host: v.host,\n  name: v.name,\n  cron: v.cron,\n  machine: v.machine ? 'true' : 'false',\n  paths: list(v.paths),\n  volumes: list(v.volumes),\n  databases: list(v.databases),\n  keep_daily: Number(v.keep_daily) || 0,\n  keep_weekly: Number(v.keep_weekly) || 0,\n  keep_monthly: Number(v.keep_monthly) || 0,\n};",
+          "getPayload": "\nconst v = {};\ncontext.panel.elements.forEach((e) => { v[e.id] = e.value; });\n// One kind of thing per schedule, so only the box that belongs to the chosen\n// type is sent. Several go in separated by commas.\nconst what = (s) => (s || '').split(/[,\\n]/).map((x) => x.trim()).filter((x) => x.length).join(',');\nreturn {\n  client: v.client,\n  host: v.host,\n  name: v.name,\n  cron: v.cron,\n  machine: v.type === 'machine' ? 'true' : 'false',\n  paths: v.type === 'directory' ? what(v.paths) : '',\n  volumes: v.type === 'volume' ? what(v.volumes) : '',\n  databases: v.type === 'database' ? what(v.databases) : '',\n  keep: Number(v.keep) || 7,\n};",
           "code": "if (context.panel.response && context.panel.response.state === 'Done') {\n  context.grafana.notifySuccess(['Backups', 'Schedule saved']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Backups', 'The API refused that: ' + JSON.stringify(context.panel.response)]);\n}",
           "payloadMode": "custom",
           "confirm": false,
@@ -905,7 +893,7 @@
               "method": "POST",
               "body_type": "raw",
               "body_content_type": "application/json",
-              "data": "{\"client\":\"${payload.client}\",\"host\":\"${payload.host}\",\"name\":\"${payload.name}\",\"cron\":\"${payload.cron}\",\"sources\":{\"machine\":\"${payload.machine}\",\"paths\":\"${payload.paths}\",\"volumes\":\"${payload.volumes}\",\"databases\":\"${payload.databases}\"},\"keep\":{\"daily\":${payload.keep_daily},\"weekly\":${payload.keep_weekly},\"monthly\":${payload.keep_monthly}}}"
+              "data": "{\"client\":\"${payload.client}\",\"host\":\"${payload.host}\",\"name\":\"${payload.name}\",\"cron\":\"${payload.cron}\",\"sources\":{\"machine\":\"${payload.machine}\",\"paths\":\"${payload.paths}\",\"volumes\":\"${payload.volumes}\",\"databases\":\"${payload.databases}\"},\"keep\":${payload.keep}}"
             }
           }
         },

@@ -5,11 +5,11 @@ providers:
   # `make bootstrap`, which pushes them over the API.
   - name: grafana-prometheus-loki
     orgId: 1
-    folder: Monitoring
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:
       path: /etc/grafana/dashboards
-      foldersFromFilesStructure: false
+      # One Grafana folder per directory: Resources, Security, System.
+      foldersFromFilesStructure: true

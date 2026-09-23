@@ -184,7 +184,7 @@ fi
 
 # ── Dashboards ─────────────────────────────────────────────────────────────
 step "Grafana dashboards"
-for f in config/grafana/dashboards/*.json; do
+for f in config/grafana/dashboards/*/*.json; do
   if out=$(python3 - "$f" <<'PY' 2>&1
 import json, sys
 d = json.load(open(sys.argv[1]))

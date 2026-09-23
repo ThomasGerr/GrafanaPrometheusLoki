@@ -94,7 +94,7 @@ touching the others.
 | Variable | Default | |
 |---|---|---|
 | `BACKUP_SCHEDULE` | `0 3 * * *` | When, as a cron line, in UTC |
-| `BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` | 7 / 4 / 6 | How many snapshots to keep; older ones are removed |
+| `BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` | 7 / 4 / 6 | How many snapshots to keep; older ones are removed. Schedules added from the dashboard use their own **Keep** instead |
 | `BACKUP_MAX_AGE_HOURS` | 26 | Alert when the last good backup is older than this |
 | `BACKUP_CHECK_READ_DATA` | | e.g. `5%`: also read back that share of the data at each check |
 | `BACKUP_RUN_ON_START` | `false` | Run once whenever the container starts |
@@ -122,14 +122,20 @@ their last backup** with an **Add a schedule** form, **Backups** with
 **Restore a backup**, and **Recent actions** with **Back up now**. Client
 Orgs get the same dashboard without that band.
 
-A schedule says what to back up — the whole machine, directories and files,
-Docker volumes, databases, or any mix — and when, as a cron line in UTC.
-Each host can have as many as you like. Client and Host are picked from the
-agents that ask this API for work, so the list is the hosts that can
-actually back up. The host's agent picks a new schedule up within a minute
-and runs it from then on, instead of the single `BACKUP_SCHEDULE` in its
-environment. If the API is unreachable, the agent keeps the schedules it
-already has.
+A schedule says what to back up — a **machine**, a **directory**, a
+**volume** or a **database** — and when, as a cron line in UTC. Each host can
+have as many as you like, so a database every hour and the whole machine on
+Sundays is two schedules. Client and Host are picked from the agents that ask
+this API for work, so the list is the hosts that can actually back up.
+
+**Keep** is how many backups of that thing to keep; the cron line already
+says how often one is made, so 7 with a nightly schedule is a week. A
+schedule only ever expires its own backups, never another schedule's on the
+same host.
+
+The host's agent picks a new schedule up within a minute and runs it from
+then on, instead of the single `BACKUP_SCHEDULE` in its environment. If the
+API is unreachable, the agent keeps the schedules it already has.
 
 Restoring starts from the table: **click a schedule** — its last backup, or
 any other column — and the panels below it show that schedule's backups.
@@ -240,7 +246,8 @@ For whoever maintains this repo:
   A button inside a table cell would not work here: Grafana fires those from
   the browser, which cannot reach the API.
 - Each snapshot is tagged `sched:<name>` by the agent, which is how a backup
-  is tied to the schedule that made it. The API turns that into the
+  is tied to the schedule that made it, and how retention stays inside one
+  schedule: `restic forget --tag sched:<name> --keep-last <keep>`. The API turns that into the
   schedule's last backup, and into one `choice` value per snapshot that
   carries host, snapshot, kind and database — so a single dropdown is enough
   to start a restore.

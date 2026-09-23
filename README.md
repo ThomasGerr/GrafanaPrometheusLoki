@@ -145,7 +145,8 @@ On the monitoring server, clone your fork and run:
 GF_SECURITY_ADMIN_PASSWORD='<your Grafana admin password>' make bootstrap-server
 ```
 
-This creates the Grafana Orgs, logins, data sources and dashboards. Any new
+This creates the Grafana Orgs, logins, data sources and dashboards, in three
+folders: Resources, Security and System. Any new
 login passwords are printed **once**, so save them straight away. Then log in
 at `https://monitor.example.com` as `admin`.
 

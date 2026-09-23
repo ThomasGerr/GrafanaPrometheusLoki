@@ -15,9 +15,7 @@ export function openDatabase(path) {
       name        TEXT NOT NULL,
       cron        TEXT NOT NULL,
       sources     TEXT NOT NULL,              -- JSON: what to back up
-      keep_daily  INTEGER NOT NULL DEFAULT 7,
-      keep_weekly INTEGER NOT NULL DEFAULT 4,
-      keep_monthly INTEGER NOT NULL DEFAULT 6,
+      keep_last   INTEGER NOT NULL DEFAULT 7,  -- how many backups to keep
       enabled     INTEGER NOT NULL DEFAULT 1,
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL,
@@ -93,6 +91,15 @@ export function openDatabase(path) {
   const columns = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!columns('snapshots').includes('schedule')) {
     db.exec('ALTER TABLE snapshots ADD COLUMN schedule TEXT');
+  }
+  // Retention used to be restic's daily/weekly/monthly. With a cron line
+  // saying how often a schedule runs, how many to keep is one number.
+  if (!columns('schedules').includes('keep_last')) {
+    db.exec('ALTER TABLE schedules ADD COLUMN keep_last INTEGER NOT NULL DEFAULT 7');
+    db.exec('UPDATE schedules SET keep_last = MAX(keep_daily, 1)');
+    for (const old of ['keep_daily', 'keep_weekly', 'keep_monthly']) {
+      try { db.exec(`ALTER TABLE schedules DROP COLUMN ${old}`); } catch { /* older SQLite */ }
+    }
   }
 
   return db;

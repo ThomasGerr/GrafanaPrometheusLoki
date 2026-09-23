@@ -115,7 +115,7 @@ def queries():
                 if "record" in rule:
                     records.add(rule["record"])
                 found.append((f"{f.name}: {name}", rule["expr"]))
-    for f in sorted((ROOT / "config/grafana/dashboards").glob("*.json")):
+    for f in sorted((ROOT / "config/grafana/dashboards").glob("*/*.json")):
         d = json.loads(f.read_text())
         for v in d.get("templating", {}).get("list", []):
             if (v.get("datasource") or {}).get("type") != "prometheus":

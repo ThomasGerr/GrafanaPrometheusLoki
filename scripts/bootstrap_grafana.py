@@ -35,7 +35,9 @@ ROOT = Path(__file__).resolve().parent.parent
 ORGS_FILE = ROOT / "generated" / "grafana-orgs.json"
 DASHBOARD_DIR = ROOT / "config" / "grafana" / "dashboards"
 
-FOLDER_TITLE = "Monitoring"
+# Dashboards used to live in one folder; they are in Resources, Security and
+# System now, and the old one is removed once it is empty.
+OLD_FOLDER_TITLE = "Monitoring"
 MAIN_ORG_ID = 1
 
 
@@ -132,11 +134,11 @@ def ensure_datasource(gf: Grafana, payload: dict) -> None:
         print(f"    created data source '{payload['name']}'")
 
 
-def ensure_folder(gf: Grafana) -> str:
+def ensure_folder(gf: Grafana, title: str) -> str:
     for f in gf.get("/api/folders") or []:
-        if f["title"] == FOLDER_TITLE:
+        if f["title"] == title:
             return f["uid"]
-    created = gf.post("/api/folders", {"title": FOLDER_TITLE})
+    created = gf.post("/api/folders", {"title": title})
     return created["uid"]
 
 
@@ -167,8 +169,14 @@ def without_admin_panels(dash: dict) -> dict:
     return {**dash, "panels": kept}
 
 
-def push_dashboards(gf: Grafana, folder_uid: str, admin_org: bool = False) -> None:
-    for path in sorted(DASHBOARD_DIR.glob("*.json")):
+def push_dashboards(gf: Grafana, admin_org: bool = False) -> None:
+    """One Grafana folder per directory, the same as provisioning does."""
+    folders: dict[str, str] = {}
+    paths = sorted(DASHBOARD_DIR.glob("*/*.json"))
+    for path in paths:
+        folder = path.parent.name
+        if folder not in folders:
+            folders[folder] = ensure_folder(gf, folder)
         dash = json.loads(path.read_text())
         if not admin_org:
             dash = without_admin_panels(dash)
@@ -177,11 +185,26 @@ def push_dashboards(gf: Grafana, folder_uid: str, admin_org: bool = False) -> No
         dash.pop("id", None)
         gf.post("/api/dashboards/db", {
             "dashboard": dash,
-            "folderUid": folder_uid,
+            "folderUid": folders[folder],
             "overwrite": True,
             "message": "bootstrap_grafana.py",
         })
-    print(f"    pushed {len(list(DASHBOARD_DIR.glob('*.json')))} dashboards")
+    print(f"    pushed {len(paths)} dashboards into {', '.join(sorted(folders))}")
+    remove_old_folder(gf)
+
+
+def remove_old_folder(gf: Grafana) -> None:
+    """Deletes the folder dashboards used to live in, but only if it is empty."""
+    folder = next((f for f in gf.get("/api/folders") or []
+                   if f["title"] == OLD_FOLDER_TITLE), None)
+    if not folder:
+        return
+    left = gf.get(f"/api/search?folderUIDs={folder['uid']}&type=dash-db") or []
+    if left:
+        print(f"    left {OLD_FOLDER_TITLE} alone: it still holds {len(left)} dashboard(s)")
+        return
+    gf.delete(f"/api/folders/{folder['uid']}")
+    print(f"    removed the empty {OLD_FOLDER_TITLE} folder")
 
 
 def ensure_user(gf: Grafana, org_id: int, user: dict) -> str | None:
@@ -264,8 +287,7 @@ def main() -> None:
     # ── Admin Org: the fleet-wide view ──────────────────────────────────
     print("Main Org (your fleet-wide view)")
     switch_org(gf, MAIN_ORG_ID)
-    folder_uid = ensure_folder(gf)
-    push_dashboards(gf, folder_uid, admin_org=True)
+    push_dashboards(gf, admin_org=True)
 
     # ── One Org per client ──────────────────────────────────────────────
     for client in data["clients"]:
@@ -303,8 +325,7 @@ def main() -> None:
             "secureJsonData": {"httpHeaderValue1": cid},
         })
 
-        folder_uid = ensure_folder(gf)
-        push_dashboards(gf, folder_uid)
+        push_dashboards(gf)
 
         for user in client["users"]:
             pw = ensure_user(gf, org_id, user)

@@ -26,9 +26,21 @@ test('a database from an earlier version is brought up to date', async () => {
     time TEXT NOT NULL, tags TEXT NOT NULL, paths TEXT NOT NULL,
     size_bytes INTEGER, reported_at TEXT NOT NULL,
     PRIMARY KEY (client, host, snapshot_id))`);
-  old.close();
+  const old2 = old;
+
+  old2.exec(`CREATE TABLE schedules (
+    id TEXT PRIMARY KEY, client TEXT NOT NULL, host TEXT NOT NULL, name TEXT NOT NULL,
+    cron TEXT NOT NULL, sources TEXT NOT NULL,
+    keep_daily INTEGER NOT NULL DEFAULT 7, keep_weekly INTEGER NOT NULL DEFAULT 4,
+    keep_monthly INTEGER NOT NULL DEFAULT 6, enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (client, host, name))`);
+  old2.prepare(`INSERT INTO schedules (id, client, host, name, cron, sources, keep_daily, created_at, updated_at)
+    VALUES ('x', 'acme', 'web-01', 'nightly', '0 3 * * *', '{"paths":["/etc"]}', 21, 'now', 'now')`).run();
+  old2.close();
 
   const a = build({ dbPath: file, adminToken: TOKEN });
+  // The old daily count becomes how many backups to keep.
+  assert.equal((await a.inject({ method: 'GET', url: '/api/schedules', headers: admin })).json()[0].keep, 21);
   const reported = await a.inject({ method: 'POST', url: '/agent/snapshots?host=web-01',
     headers: { 'x-client-id': 'acme' },
     payload: { snapshots: [{ id: 'aabbccdd', time: '2026-09-23T03:03:00Z', tags: ['files', 'sched:nightly'], paths: ['/rootfs/etc'] }] } });
@@ -55,7 +67,7 @@ test('a schedule is created, listed, changed and deleted', async () => {
   assert.equal(created.statusCode, 201);
   const body = created.json();
   assert.equal(body.sources.paths[0], '/etc');
-  assert.equal(body.keep.daily, 7);
+  assert.equal(body.keep, 7, 'how many to keep, the default');
   // The dashboard shows this line instead of three JSON arrays.
   assert.equal(body.backs_up, '/etc + volume app_data + database app');
 
@@ -63,9 +75,9 @@ test('a schedule is created, listed, changed and deleted', async () => {
   assert.equal(list.length, 1);
 
   const patched = (await a.inject({ method: 'PATCH', url: `/api/schedules/${body.id}`, headers: admin,
-    payload: { cron: '30 4 * * 0', keep: { daily: 14 }, enabled: false } })).json();
+    payload: { cron: '30 4 * * 0', keep: 14, enabled: false } })).json();
   assert.equal(patched.cron, '30 4 * * 0');
-  assert.equal(patched.keep.daily, 14);
+  assert.equal(patched.keep, 14);
   assert.equal(patched.enabled, false);
 
   assert.equal((await a.inject({ method: 'DELETE', url: `/api/schedules/${body.id}`, headers: admin })).statusCode, 200);

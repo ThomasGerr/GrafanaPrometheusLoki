@@ -102,9 +102,7 @@ if [[ "${1:-}" == schedule ]]; then
   mapfile -t SCHEDULE_PATHS     < <(jq -r '.sources.paths[]?' <<<"$spec")
   mapfile -t SCHEDULE_VOLUMES   < <(jq -r '.sources.volumes[]?' <<<"$spec")
   mapfile -t SCHEDULE_DATABASES < <(jq -r '.sources.databases[]?' <<<"$spec")
-  BACKUP_KEEP_DAILY="$(jq -r '.keep.daily' <<<"$spec")"
-  BACKUP_KEEP_WEEKLY="$(jq -r '.keep.weekly' <<<"$spec")"
-  BACKUP_KEEP_MONTHLY="$(jq -r '.keep.monthly' <<<"$spec")"
+  SCHEDULE_KEEP="$(jq -r '.keep' <<<"$spec")"
 fi
 
 # ── A run ───────────────────────────────────────────────────────────────────
@@ -277,10 +275,20 @@ if [[ ${#paths[@]} -eq 0 && ${#DUMPS[@]} -eq 0 ]]; then
   ok=0
 fi
 
-# Retention, for this host's snapshots only.
-if ! restic forget --host "$HOST" --prune --quiet \
-       --keep-daily "${BACKUP_KEEP_DAILY:-7}" --keep-weekly "${BACKUP_KEEP_WEEKLY:-4}" \
-       --keep-monthly "${BACKUP_KEEP_MONTHLY:-6}" >/dev/null; then
+# Retention, for this host's snapshots only. A schedule keeps a number of
+# backups of each thing it backs up — its cron line says how often that is —
+# and only touches its own, so schedules on one host cannot expire each
+# other's. Without a schedule this is the age-based retention from the
+# environment.
+if [[ "$USING_SCHEDULE" == 1 ]]; then
+  forget=(restic forget --host "$HOST" --tag "sched:$RUN_LABEL"
+          --group-by "host,paths,tags" --keep-last "${SCHEDULE_KEEP:-7}")
+else
+  forget=(restic forget --host "$HOST"
+          --keep-daily "${BACKUP_KEEP_DAILY:-7}" --keep-weekly "${BACKUP_KEEP_WEEKLY:-4}"
+          --keep-monthly "${BACKUP_KEEP_MONTHLY:-6}")
+fi
+if ! "${forget[@]}" --prune --quiet >/dev/null; then
   log "WARNING applying retention failed; old snapshots are kept"
 fi
 

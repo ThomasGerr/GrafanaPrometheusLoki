@@ -93,7 +93,7 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
       id: r.id, client: r.client, host: r.host, name: r.name, cron: r.cron,
       sources,
       backs_up: describeSources(sources),
-      keep: { daily: r.keep_daily, weekly: r.keep_weekly, monthly: r.keep_monthly },
+      keep: r.keep_last,
       enabled: !!r.enabled, created_at: r.created_at, updated_at: r.updated_at,
     };
   };
@@ -150,15 +150,17 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
     if (!validCron(b.cron || '')) return bad(reply, 'cron must be five fields, e.g. 0 3 * * *');
     const sources = cleanSources(b.sources);
     if (typeof sources === 'string') return bad(reply, sources);
-    const keep = b.keep || {};
+    // How many of each backup this schedule keeps. Its cron line already
+    // says how often it runs, so one number is the whole of retention.
+    const keep = Math.min(Math.max(Math.round(Number(b.keep ?? 7)) || 7, 1), 999);
     const now = new Date().toISOString();
     const id = randomUUID();
     try {
       db.prepare(`
-        INSERT INTO schedules (id, client, host, name, cron, sources, keep_daily, keep_weekly, keep_monthly, enabled, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO schedules (id, client, host, name, cron, sources, keep_last, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(id, b.client, b.host, b.name, String(b.cron).trim(), JSON.stringify(sources),
-        Number(keep.daily ?? 7), Number(keep.weekly ?? 4), Number(keep.monthly ?? 6),
+        keep,
         b.enabled === false ? 0 : 1, now, now);
     } catch (e) {
       if (String(e.message).includes('UNIQUE')) {
@@ -175,7 +177,7 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
     if (!row) return reply.code(404).send({ error: 'no such schedule' });
     const b = req.body || {};
     const next = { cron: row.cron, sources: row.sources, enabled: row.enabled,
-      keep_daily: row.keep_daily, keep_weekly: row.keep_weekly, keep_monthly: row.keep_monthly };
+      keep_last: row.keep_last };
     if (b.cron !== undefined) {
       if (!validCron(b.cron)) return bad(reply, 'cron must be five fields, e.g. 0 3 * * *');
       next.cron = String(b.cron).trim();
@@ -186,13 +188,11 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
       next.sources = JSON.stringify(sources);
     }
     if (b.enabled !== undefined) next.enabled = b.enabled ? 1 : 0;
-    if (b.keep) {
-      if (b.keep.daily !== undefined) next.keep_daily = Number(b.keep.daily);
-      if (b.keep.weekly !== undefined) next.keep_weekly = Number(b.keep.weekly);
-      if (b.keep.monthly !== undefined) next.keep_monthly = Number(b.keep.monthly);
+    if (b.keep !== undefined) {
+      next.keep_last = Math.min(Math.max(Math.round(Number(b.keep)) || row.keep_last, 1), 999);
     }
-    db.prepare(`UPDATE schedules SET cron = ?, sources = ?, enabled = ?, keep_daily = ?, keep_weekly = ?, keep_monthly = ?, updated_at = ? WHERE id = ?`)
-      .run(next.cron, next.sources, next.enabled, next.keep_daily, next.keep_weekly, next.keep_monthly, new Date().toISOString(), req.params.id);
+    db.prepare(`UPDATE schedules SET cron = ?, sources = ?, enabled = ?, keep_last = ?, updated_at = ? WHERE id = ?`)
+      .run(next.cron, next.sources, next.enabled, next.keep_last, new Date().toISOString(), req.params.id);
     audit(db, 'admin', 'schedule.update', { id: req.params.id, changed: Object.keys(b) });
     return rowToSchedule(db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id));
   });
