@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import { build } from '../src/server.js';
 
 const TOKEN = 'test-admin-token';
@@ -12,6 +16,28 @@ const schedule = {
   client: 'acme', host: 'web-01', name: 'nightly', cron: '0 3 * * *',
   sources: { paths: ['/etc'], volumes: ['app_data'], databases: ['app'] },
 };
+
+test('a database from an earlier version is brought up to date', async () => {
+  const file = path.join(os.tmpdir(), `em-backup-api-${Date.now()}.db`);
+  // The snapshots table as the first release created it: no schedule column.
+  const old = new Database(file);
+  old.exec(`CREATE TABLE snapshots (
+    client TEXT NOT NULL, host TEXT NOT NULL, snapshot_id TEXT NOT NULL,
+    time TEXT NOT NULL, tags TEXT NOT NULL, paths TEXT NOT NULL,
+    size_bytes INTEGER, reported_at TEXT NOT NULL,
+    PRIMARY KEY (client, host, snapshot_id))`);
+  old.close();
+
+  const a = build({ dbPath: file, adminToken: TOKEN });
+  const reported = await a.inject({ method: 'POST', url: '/agent/snapshots?host=web-01',
+    headers: { 'x-client-id': 'acme' },
+    payload: { snapshots: [{ id: 'aabbccdd', time: '2026-09-23T03:03:00Z', tags: ['files', 'sched:nightly'], paths: ['/rootfs/etc'] }] } });
+  assert.equal(reported.statusCode, 201);
+  assert.equal((await a.inject({ method: 'GET', url: '/api/snapshots?schedule=nightly', headers: admin })).json().length, 1);
+  await a.close();
+  fs.rmSync(file, { force: true });
+  for (const extra of ['-wal', '-shm']) fs.rmSync(file + extra, { force: true });
+});
 
 test('the dashboard side needs the admin token', async () => {
   const a = app();
@@ -167,6 +193,39 @@ test('a restore job needs a snapshot and a kind, and a database needs its name',
     payload: { ...base, snapshot_id: 'latest', kind: 'database', database: 'app' } });
   assert.equal(ok.statusCode, 201);
   assert.equal(ok.json().payload.switch, true, 'restores switch over by default');
+  await a.close();
+});
+
+test('the hosts that poll can be offered as choices, and a schedule knows its last backup', async () => {
+  const a = app();
+  const agent = { 'x-client-id': 'acme' };
+  await a.inject({ method: 'POST', url: '/api/schedules', headers: admin, payload: schedule });
+
+  // A host is known once its agent has asked for work.
+  assert.deepEqual((await a.inject({ method: 'GET', url: '/api/hosts', headers: admin })).json(), []);
+  await a.inject({ method: 'GET', url: '/agent/schedules?host=web-01', headers: agent });
+  await a.inject({ method: 'GET', url: '/agent/schedules?host=web-02', headers: agent });
+  const hosts = (await a.inject({ method: 'GET', url: '/api/hosts', headers: admin })).json();
+  assert.deepEqual(hosts.map((h) => `${h.client}/${h.host}`), ['acme/web-01', 'acme/web-02']);
+
+  // Snapshots say which schedule made them, and the schedule shows its last.
+  await a.inject({ method: 'POST', url: '/agent/snapshots?host=web-01', headers: agent,
+    payload: { snapshots: [
+      { id: 'aaaaaaaa', time: '2026-09-20T03:00:00Z', tags: ['files', 'nightly', 'sched:nightly'], paths: ['/rootfs/etc'] },
+      { id: 'bbbbbbbb', time: '2026-09-23T03:00:00Z', tags: ['db', 'app', 'sched:nightly'], paths: ['/databases/app.pgdump'] },
+      { id: 'cccccccc', time: '2026-09-23T04:00:00Z', tags: ['files', 'other', 'sched:other'], paths: ['/rootfs/srv'] },
+    ] } });
+
+  const listed = (await a.inject({ method: 'GET', url: '/api/schedules', headers: admin })).json()[0];
+  assert.equal(listed.last_backup_at, '2026-09-23T03:00:00Z');
+  assert.equal(listed.backup_count, 2, 'only its own snapshots count');
+
+  const mine = (await a.inject({ method: 'GET', url: '/api/snapshots?schedule=nightly', headers: admin })).json();
+  assert.deepEqual(mine.map((x) => x.snapshot_id), ['bbbbbbbb', 'aaaaaaaa']);
+  assert.equal(mine[0].holds, 'database app', 'the schedule tag stays out of what it holds');
+  // One value carries everything a restore needs, so a dropdown is enough.
+  assert.equal(mine[0].choice, 'acme|web-01|bbbbbbbb|database|app');
+  assert.equal(mine[1].choice, 'acme|web-01|aaaaaaaa|files|');
   await a.close();
 });
 

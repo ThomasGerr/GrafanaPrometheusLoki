@@ -154,7 +154,7 @@ if [[ ${#paths[@]} -gt 0 ]]; then
   log "backing up ${paths[*]}"
   # The agent's own write-ahead log and CrowdSec's hub cache are not worth
   # keeping; a database's live files are, but see the dumps below.
-  if summary="$(restic backup --host "$HOST" --tag files --tag "$RUN_LABEL" --json --exclude-caches \
+  if summary="$(restic backup --host "$HOST" --tag files --tag "$RUN_LABEL" --tag "sched:$RUN_LABEL" --json --exclude-caches \
                   --exclude '/rootfs/var/lib/docker/volumes/*alloy-data*' \
                   --exclude '/rootfs/var/lib/docker/volumes/*backup-cache*' \
                   "${extra_excludes[@]+"${extra_excludes[@]}"}" \
@@ -224,7 +224,7 @@ dump() {
       log "SQL Server $name: no dump; its own BACKUP DATABASE writes on the database server. Back up its volume instead (BACKUP_DOCKER_VOLUMES)."
       return 0 ;;
   esac
-  if summary="$(restic backup --host "$HOST" --tag db --tag "$name" --json \
+  if summary="$(restic backup --host "$HOST" --tag db --tag "$name" --tag "sched:$RUN_LABEL" --json \
                   --stdin-from-command --stdin-filename "databases/$file" -- "${cmd[@]}" \
                 | jq -c 'select(.message_type == "summary")')" && [[ -n "$summary" ]]; then
     M["restic_dump_success{db=\"$name\",engine=\"$engine\"}"]=1

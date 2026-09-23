@@ -101,9 +101,10 @@ touching the others.
 
 ## Seeing it work
 
-- **The Backups dashboard:** per host, when the last good backup was,
-  whether the last run and the integrity check passed, how long it took and
-  how much it added. Each database dump's status and size is shown too.
+- **The Backups dashboard:** how many hosts are backed up, whether the last
+  run and the integrity check passed, and the oldest last backup across the
+  fleet — then every schedule with when it last ran, how long runs take and
+  how much they add.
 - **Alerts:** **BackupFailed**, **BackupTooOld**, **BackupRepositoryDamaged**,
   **DatabaseDumpFailed**. See the [runbook](alert-runbook.md#backupfailed).
 - **On the server:**
@@ -116,22 +117,28 @@ touching the others.
 
 ## Schedules and restores from the dashboard
 
-The Backups dashboard has a band of panels only you can see: **Schedules**
-with an **Add a schedule** form, **Latest backups** with **Restore a
-backup**, and **Recent actions** with **Back up now**. Client Orgs get the
-same dashboard without that band.
+The Backups dashboard has a band of panels only you can see: **Schedules and
+their last backup** with an **Add a schedule** form, **Backups** with
+**Restore a backup**, and **Recent actions** with **Back up now**. Client
+Orgs get the same dashboard without that band.
 
 A schedule says what to back up — the whole machine, directories and files,
 Docker volumes, databases, or any mix — and when, as a cron line in UTC.
-Each host can have as many as you like. Adding one is the form; the host's
-agent picks it up within a minute and runs it from then on, instead of the
-single `BACKUP_SCHEDULE` in its environment. If the API is unreachable, the
-agent keeps the schedules it already has.
+Each host can have as many as you like. Client and Host are picked from the
+agents that ask this API for work, so the list is the hosts that can
+actually back up. The host's agent picks a new schedule up within a minute
+and runs it from then on, instead of the single `BACKUP_SCHEDULE` in its
+environment. If the API is unreachable, the agent keeps the schedules it
+already has.
 
-Restoring is the same shape: pick a snapshot, say whether it is files or a
-database, and the host does it. **Nothing is written over.** The restore
-lands beside the live data and only switches once it has finished, keeping
-what was there:
+Restoring starts from the table: **click a schedule** — its last backup, or
+any other column — and the panels below it show that schedule's backups.
+Pick one in **Restore a backup** and press the button. The backup you pick
+carries the rest with it, so there is nothing else to fill in: which host it
+came from, and whether it holds files or a database.
+
+**Nothing is written over.** The restore lands beside the live data and only
+switches once it has finished, keeping what was there:
 
 | | Restored as | What was there becomes |
 |---|---|---|
@@ -227,6 +234,16 @@ For whoever maintains this repo:
   panel. The token sits in that data source, so it never reaches a browser,
   and `scripts/bootstrap_grafana.py` strips those panels from the copy each
   client Org gets.
+- Clicking a row in the schedules table sets three hidden dashboard
+  variables (`bclient`, `bhost`, `bschedule`) through an ordinary data link;
+  the panels below filter on them and say in their titles what is selected.
+  A button inside a table cell would not work here: Grafana fires those from
+  the browser, which cannot reach the API.
+- Each snapshot is tagged `sched:<name>` by the agent, which is how a backup
+  is tied to the schedule that made it. The API turns that into the
+  schedule's last backup, and into one `choice` value per snapshot that
+  carries host, snapshot, kind and database — so a single dropdown is enough
+  to start a restore.
 - A restore stages first and switches afterwards (`agent/backup/restore.sh`).
   PostgreSQL renames through a different maintenance database than the one
   being restored, because a database cannot be renamed through a connection

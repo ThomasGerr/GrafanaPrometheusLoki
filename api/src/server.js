@@ -113,6 +113,10 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
     const host = req.query?.host;
     if (!client || !CLIENT.test(client)) return reply.code(401).send({ error: 'unauthorized' });
     if (!host || !HOST.test(host)) return reply.code(400).send({ error: 'host is required' });
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO hosts (client, host, first_seen, last_seen) VALUES (?, ?, ?, ?)
+                ON CONFLICT (client, host) DO UPDATE SET last_seen = excluded.last_seen`)
+      .run(client, host, now, now);
     req.agent = { client, host };
   });
 
@@ -122,11 +126,20 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
   app.get('/api/schedules', { preHandler: [app.adminOnly] }, async (req) => {
     const { client, host } = req.query;
     const rows = db.prepare(`
-      SELECT * FROM schedules
-      WHERE (@client IS NULL OR client = @client) AND (@host IS NULL OR host = @host)
-      ORDER BY client, host, name
+      SELECT s.*,
+             (SELECT MAX(time) FROM snapshots n
+               WHERE n.client = s.client AND n.host = s.host AND n.schedule = s.name) AS last_backup_at,
+             (SELECT COUNT(*) FROM snapshots n
+               WHERE n.client = s.client AND n.host = s.host AND n.schedule = s.name) AS backup_count
+      FROM schedules s
+      WHERE (@client IS NULL OR s.client = @client) AND (@host IS NULL OR s.host = @host)
+      ORDER BY s.client, s.host, s.name
     `).all({ client: client || null, host: host || null });
-    return rows.map(rowToSchedule);
+    return rows.map((r) => ({
+      ...rowToSchedule(r),
+      last_backup_at: r.last_backup_at,
+      backup_count: r.backup_count,
+    }));
   });
 
   app.post('/api/schedules', { preHandler: [app.adminOnly] }, async (req, reply) => {
@@ -202,25 +215,47 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
       .map((r) => ({ ...r, ok: !!r.ok, summary: JSON.parse(r.summary) }));
   });
 
+  // Every agent that has ever polled, newest contact first. The dashboard
+  // fills its Client and Host pickers from this.
+  app.get('/api/hosts', { preHandler: [app.adminOnly] }, async (req) => {
+    return db.prepare(`
+      SELECT client, host, first_seen, last_seen FROM hosts
+      WHERE (@client IS NULL OR client = @client)
+      ORDER BY client, host
+    `).all({ client: req.query.client || null });
+  });
+
   app.get('/api/snapshots', { preHandler: [app.adminOnly] }, async (req) => {
     const limit = Math.min(Number(req.query.limit || 100), 1000);
     return db.prepare(`
       SELECT * FROM snapshots
       WHERE (@client IS NULL OR client = @client) AND (@host IS NULL OR host = @host)
+        AND (@schedule IS NULL OR schedule = @schedule)
       ORDER BY time DESC LIMIT @limit
-    `).all({ client: req.query.client || null, host: req.query.host || null, limit })
+    `).all({
+      client: req.query.client || null,
+      host: req.query.host || null,
+      schedule: req.query.schedule || null,
+      limit,
+    })
       .map((r) => {
         const tags = JSON.parse(r.tags);
         const paths = JSON.parse(r.paths);
         // The agent tags each snapshot `db <name>` or `files <schedule>`, and
         // its paths are under /rootfs. Both are turned into one readable line.
+        const named = tags.filter((t) => !String(t).startsWith('sched:'));
         const holds = tags.includes('db')
-          ? `database ${tags.filter((t) => t !== 'db').join(', ')}`
-          : paths.map((x) => x.replace(/^\/rootfs/, '')).join(', ') || tags.join(', ');
+          ? `database ${named.filter((t) => t !== 'db').join(', ')}`
+          : paths.map((x) => x.replace(/^\/rootfs/, '')).join(', ') || named.join(', ');
         // What a dropdown shows for this snapshot: when it was taken, from
         // which host, and what is in it.
         const label = `${r.time.slice(0, 16).replace('T', ' ')} ${r.host}: ${holds}`;
-        return { ...r, tags, paths, holds, label };
+        // Everything a restore needs, in one value a dropdown can carry:
+        // which host, which snapshot, and what to put back where.
+        const kind = tags.includes('db') ? 'database' : 'files';
+        const target = kind === 'database' ? named.filter((t) => t !== 'db')[0] || '' : '';
+        const choice = [r.client, r.host, r.snapshot_id, kind, target].join('|');
+        return { ...r, tags, paths, holds, label, kind, choice };
       });
   });
 
@@ -323,11 +358,16 @@ export function build({ dbPath = DB_PATH, adminToken = ADMIN_TOKEN, logger = fal
     const now = new Date().toISOString();
     const replace = db.transaction(() => {
       db.prepare('DELETE FROM snapshots WHERE client = ? AND host = ?').run(client, host);
-      const insert = db.prepare('INSERT OR REPLACE INTO snapshots (client, host, snapshot_id, time, tags, paths, size_bytes, reported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const insert = db.prepare('INSERT OR REPLACE INTO snapshots (client, host, snapshot_id, time, tags, paths, schedule, size_bytes, reported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
       for (const s of list.slice(0, 1000)) {
         if (!s?.id || !s?.time) continue;
+        const tags = s.tags || [];
+        // The agent tags every snapshot `sched:<name>`; older ones have no
+        // such tag and simply belong to no schedule.
+        const from = tags.find((t) => String(t).startsWith('sched:'));
         insert.run(client, host, String(s.id).slice(0, 64), String(s.time),
-          JSON.stringify(s.tags || []), JSON.stringify(s.paths || []),
+          JSON.stringify(tags), JSON.stringify(s.paths || []),
+          from ? String(from).slice(6, 70) : null,
           Number.isFinite(s.size_bytes) ? Math.round(s.size_bytes) : null, now);
       }
     });

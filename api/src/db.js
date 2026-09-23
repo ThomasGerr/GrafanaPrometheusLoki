@@ -60,11 +60,22 @@ export function openDatabase(path) {
       time        TEXT NOT NULL,
       tags        TEXT NOT NULL,              -- JSON array
       paths       TEXT NOT NULL,              -- JSON array
+      schedule    TEXT,                       -- which schedule made it
       size_bytes  INTEGER,
       reported_at TEXT NOT NULL,
       PRIMARY KEY (client, host, snapshot_id)
     );
     CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots (client, host, time);
+
+    -- Every agent that has asked this API for work, so the dashboard can
+    -- offer the hosts you can actually back up rather than a text box.
+    CREATE TABLE IF NOT EXISTS hosts (
+      client    TEXT NOT NULL,
+      host      TEXT NOT NULL,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      PRIMARY KEY (client, host)
+    );
 
     -- Who asked for what, kept whatever happens to the job itself.
     CREATE TABLE IF NOT EXISTS audit (
@@ -75,6 +86,15 @@ export function openDatabase(path) {
       detail    TEXT NOT NULL
     );
   `);
+
+  // Columns added after the first release. A live database was created by an
+  // earlier version of the statements above, and CREATE TABLE IF NOT EXISTS
+  // leaves it exactly as it was, so each one is added here if missing.
+  const columns = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!columns('snapshots').includes('schedule')) {
+    db.exec('ALTER TABLE snapshots ADD COLUMN schedule TEXT');
+  }
+
   return db;
 }
 
