@@ -114,7 +114,45 @@ touching the others.
   docker logs grafana-prometheus-loki-backup                   # what the runs did
   ```
 
-## Restoring
+## Schedules and restores from the dashboard
+
+The Backups dashboard has a band of panels only you can see: **Schedules**
+with an **Add a schedule** form, **Latest backups** with **Restore a
+backup**, and **Recent actions** with **Back up now**. Client Orgs get the
+same dashboard without that band.
+
+A schedule says what to back up — the whole machine, directories and files,
+Docker volumes, databases, or any mix — and when, as a cron line in UTC.
+Each host can have as many as you like. Adding one is the form; the host's
+agent picks it up within a minute and runs it from then on, instead of the
+single `BACKUP_SCHEDULE` in its environment. If the API is unreachable, the
+agent keeps the schedules it already has.
+
+Restoring is the same shape: pick a snapshot, say whether it is files or a
+database, and the host does it. **Nothing is written over.** The restore
+lands beside the live data and only switches once it has finished, keeping
+what was there:
+
+| | Restored as | What was there becomes |
+|---|---|---|
+| Files | `<path>` | `<path>_old_<timestamp>` |
+| PostgreSQL | database `<name>` | `<name>_old_<timestamp>` |
+| MySQL / MariaDB | database `<name>` | `<name>_old_<timestamp>` |
+| MongoDB | database `<name>` | `<name>_old_<timestamp>` |
+| Redis | staged on the host as an `.rdb` | not switched — Redis only loads a snapshot at start-up |
+| SQL Server | refused — restore its volume instead | |
+
+So a restore that fails leaves the live data untouched, and one you regret is
+undone by moving the `_old` copy back. Turning **Switch over** off restores
+beside the live data and stops there.
+
+Set it up on the monitoring stack by putting a long random value in
+`BACKUP_API_TOKEN` in its `.env`. The monitored hosts need nothing extra:
+the agent polls the API through the same ingest gateway and credentials it
+already pushes metrics with, so a server still accepts no inbound
+connections.
+
+## Restoring by hand
 
 The container has restic and every database's client tools, and it is
 already configured for the repository. Restoring into the database a dump
@@ -175,3 +213,21 @@ For whoever maintains this repo:
 - MySQL is dumped per user database rather than with `--all-databases`,
   because a fresh MySQL 8 refuses to load the system schema from a dump.
   The backup would fail exactly when it is needed.
+- Schedules, restores and history live in the `backup-api` service on the
+  monitoring stack: Fastify over SQLite (`api/`), reachable only on the
+  stack's own network. `/api/*` needs the `BACKUP_API_TOKEN`; `/agent/*` is
+  reached through the ingest gateway, which authenticates the agent and sets
+  `X-Client-Id` from the username it logged in with, so an agent can only
+  ever see and finish its own host's work.
+- `agent/backup/poll.sh` does the polling: it writes the schedules it is
+  given to the container's crontab, claims one job at a time, runs it, and
+  reports the result and the repository's snapshots back.
+- The dashboard reads and drives the API through Grafana's own backend, with
+  the Infinity data source (`Backups`, admin Org only) and the Business Forms
+  panel. The token sits in that data source, so it never reaches a browser,
+  and `scripts/bootstrap_grafana.py` strips those panels from the copy each
+  client Org gets.
+- A restore stages first and switches afterwards (`agent/backup/restore.sh`).
+  PostgreSQL renames through a different maintenance database than the one
+  being restored, because a database cannot be renamed through a connection
+  to itself; MySQL has no database rename, so its tables are moved across.

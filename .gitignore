@@ -18,3 +18,5 @@ data/
 
 # `make render` output
 renders/
+api/node_modules
+__pycache__/

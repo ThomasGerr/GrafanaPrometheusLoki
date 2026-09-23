@@ -87,7 +87,7 @@ afterwards, or it will start again next to the new one.
 | `RESTIC_REPOSITORY`, `RESTIC_PASSWORD` | Required with backups: where they go and the password that encrypts them. Plus the storage's own variables, e.g. `AWS_ACCESS_KEY_ID`. |
 | `BACKUP_PATHS`, `BACKUP_DOCKER_VOLUMES` | What to back up besides the databases: host directories, and `true` for every Docker volume. |
 | `BACKUP_DB_<NAME>` | The user a database's dump connects as, when its `DB_<NAME>` user may not read the data. |
-| `BACKUP_SCHEDULE`, `BACKUP_KEEP_*`, `BACKUP_MAX_AGE_HOURS` | When and how long to keep; see [backups.md](backups.md#settings). |
+| `BACKUP_SCHEDULE`, `BACKUP_KEEP_*`, `BACKUP_MAX_AGE_HOURS` | When and how long to keep; see [backups.md](backups.md#settings). Schedules added from the dashboard take over from `BACKUP_SCHEDULE`. |
 
 Put a value in single quotes when it contains `$`, a space or `#`, for
 example `INGEST_PASSWORD='pa$$word'`. Docker Compose would otherwise read

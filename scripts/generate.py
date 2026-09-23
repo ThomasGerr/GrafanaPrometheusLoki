@@ -380,6 +380,8 @@ deleteDatasources:
     orgId: 1
   - name: Loki
     orgId: 1
+  - name: Backups
+    orgId: 1
 
 datasources:
   - name: Prometheus
@@ -408,6 +410,22 @@ datasources:
       httpHeaderName1: X-Scope-OrgID
     secureJsonData:
       httpHeaderValue1: "{all_tenants}"
+
+  # The backup control API. It listens on the internal network only, so the
+  # Backups dashboard reaches it through here — Grafana's own backend — and
+  # the admin token never leaves the server.
+  - name: Backups
+    uid: backups
+    type: yesoreyeram-infinity-datasource
+    orgId: 1
+    editable: false
+    jsonData:
+      global_queries: []
+      allowedHosts:
+        - http://backup-api:3000
+      httpHeaderName1: X-API-Key
+    secureJsonData:
+      httpHeaderValue1: $BACKUP_API_TOKEN
 """
 
 

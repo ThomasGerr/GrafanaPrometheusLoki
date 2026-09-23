@@ -53,7 +53,7 @@ class Grafana:
             # urllib's default User-Agent is "Python-urllib/3.x", which
             # Cloudflare's bot rules reject outright with a 403 error 1010
             # ("browser signature banned") before the request reaches Grafana.
-            "User-Agent": "grafana-prometheus-loki-bootstrap/1",
+            "User-Agent": "ethic-monitor-bootstrap/1",
         }
 
     def call(self, method: str, path: str, body=None, ok_statuses=()):
@@ -140,9 +140,38 @@ def ensure_folder(gf: Grafana) -> str:
     return created["uid"]
 
 
-def push_dashboards(gf: Grafana, folder_uid: str) -> None:
+# Panels that drive the backup API. They only work in the admin Org, which is
+# the only one with that data source, and only you may start a restore — so
+# they are taken out of the copy each client Org gets.
+ADMIN_DATASOURCE = "backups"
+
+
+def is_admin_panel(panel: dict) -> bool:
+    if panel.get("type") == "row" and panel.get("title", "").endswith("(admin)"):
+        return True
+    sources = [panel.get("datasource")] + [t.get("datasource") for t in panel.get("targets", [])]
+    return any(isinstance(s, dict) and s.get("uid") == ADMIN_DATASOURCE for s in sources)
+
+
+def without_admin_panels(dash: dict) -> dict:
+    """The same dashboard with the admin-only band removed and the gap closed."""
+    admin = [p for p in dash.get("panels", []) if is_admin_panel(p)]
+    if not admin:
+        return dash
+    top = min(p["gridPos"]["y"] for p in admin)
+    bottom = max(p["gridPos"]["y"] + p["gridPos"]["h"] for p in admin)
+    kept = [p for p in dash["panels"] if not is_admin_panel(p)]
+    for p in kept:
+        if p["gridPos"]["y"] >= bottom:
+            p["gridPos"]["y"] -= bottom - top
+    return {**dash, "panels": kept}
+
+
+def push_dashboards(gf: Grafana, folder_uid: str, admin_org: bool = False) -> None:
     for path in sorted(DASHBOARD_DIR.glob("*.json")):
         dash = json.loads(path.read_text())
+        if not admin_org:
+            dash = without_admin_panels(dash)
         # Let Grafana own the version counter, or repeat runs collide.
         dash.pop("version", None)
         dash.pop("id", None)
@@ -236,7 +265,7 @@ def main() -> None:
     print("Main Org (your fleet-wide view)")
     switch_org(gf, MAIN_ORG_ID)
     folder_uid = ensure_folder(gf)
-    push_dashboards(gf, folder_uid)
+    push_dashboards(gf, folder_uid, admin_org=True)
 
     # ── One Org per client ──────────────────────────────────────────────
     for client in data["clients"]:

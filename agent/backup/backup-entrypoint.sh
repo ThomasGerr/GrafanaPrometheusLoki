@@ -24,4 +24,9 @@ echo "backup: scheduled at '$schedule' (UTC); repository $(sed -E 's#//[^@/]*@#/
 /usr/local/bin/backup init-metrics || echo "backup: WARNING the repository is not reachable yet" >&2
 [[ "${BACKUP_RUN_ON_START:-false}" != true ]] || /usr/local/bin/backup &
 
+# Schedules and jobs from the backup API, when the agent has ingest
+# credentials. It rewrites the crontab above from the schedules the API
+# holds; without the API, the line written above stays.
+/usr/local/bin/backup-poll &
+
 exec crond -f -l 8

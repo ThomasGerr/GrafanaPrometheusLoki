@@ -2,8 +2,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # One backup run, with restic. Run by crond on BACKUP_SCHEDULE, or by hand:
 #
-#   docker exec grafana-prometheus-loki-backup backup          a full run now
-#   docker exec grafana-prometheus-loki-backup backup check    repository reachable?
+#   docker exec grafana-prometheus-loki-backup backup              a full run now
+#   docker exec grafana-prometheus-loki-backup backup schedule x   one schedule's run
+#   docker exec grafana-prometheus-loki-backup backup check        repository reachable?
+#
+# A schedule comes from the backup API (the Backups dashboard) and says what
+# to back up: the whole machine, paths, Docker volumes or databases. Without
+# any schedules, the BACKUP_* variables below are used instead.
 #
 # A run backs up, in separate snapshots tagged by kind:
 #   files   BACKUP_PATHS (host paths) and, with BACKUP_DOCKER_VOLUMES=true,
@@ -81,6 +86,27 @@ if [[ "${1:-}" == init-metrics ]]; then
   exit 0
 fi
 
+# ── What this run backs up ──────────────────────────────────────────────────
+# Either one schedule from the API, or the BACKUP_* variables.
+SPECS=/run/backup-schedules.json
+RUN_LABEL=manual
+SCHEDULE_PATHS=(); SCHEDULE_VOLUMES=(); SCHEDULE_DATABASES=(); SCHEDULE_MACHINE=false
+USING_SCHEDULE=""
+if [[ "${1:-}" == schedule ]]; then
+  RUN_LABEL="${2:?a schedule name is required}"
+  [[ -f "$SPECS" ]] || { log "ERROR no schedules from the API yet"; exit 1; }
+  spec="$(jq -c --arg n "$RUN_LABEL" '.[] | select(.name == $n)' "$SPECS")"
+  [[ -n "$spec" ]] || { log "ERROR no schedule called $RUN_LABEL"; exit 1; }
+  USING_SCHEDULE=1
+  SCHEDULE_MACHINE="$(jq -r '.sources.machine // false' <<<"$spec")"
+  mapfile -t SCHEDULE_PATHS     < <(jq -r '.sources.paths[]?' <<<"$spec")
+  mapfile -t SCHEDULE_VOLUMES   < <(jq -r '.sources.volumes[]?' <<<"$spec")
+  mapfile -t SCHEDULE_DATABASES < <(jq -r '.sources.databases[]?' <<<"$spec")
+  BACKUP_KEEP_DAILY="$(jq -r '.keep.daily' <<<"$spec")"
+  BACKUP_KEEP_WEEKLY="$(jq -r '.keep.weekly' <<<"$spec")"
+  BACKUP_KEEP_MONTHLY="$(jq -r '.keep.monthly' <<<"$spec")"
+fi
+
 # ── A run ───────────────────────────────────────────────────────────────────
 exec 9>/run/backup.lock
 flock -n 9 || { log "a backup is already running; skipping this one"; exit 0; }
@@ -100,22 +126,38 @@ if ! repo_ready; then
 fi
 
 # Files: host paths and Docker volumes.
-paths=()
-IFS=',' read -r -a wanted <<<"${BACKUP_PATHS:-}"
+paths=(); extra_excludes=()
+if [[ -n "$USING_SCHEDULE" ]]; then
+  if [[ "$SCHEDULE_MACHINE" == true ]]; then
+    paths+=(/rootfs)
+    # Everything the kernel makes up rather than stores, and Docker's image
+    # layers, which are rebuilt from the registry.
+    for e in /proc /sys /dev /run /tmp /var/run /var/lib/docker/overlay2 /var/lib/docker/containers; do
+      extra_excludes+=(--exclude "/rootfs$e")
+    done
+  fi
+  wanted=("${SCHEDULE_PATHS[@]+"${SCHEDULE_PATHS[@]}"}")
+  for v in "${SCHEDULE_VOLUMES[@]+"${SCHEDULE_VOLUMES[@]}"}"; do
+    wanted+=("/var/lib/docker/volumes/$v")
+  done
+else
+  IFS=',' read -r -a wanted <<<"${BACKUP_PATHS:-}"
+  [[ "${BACKUP_DOCKER_VOLUMES:-false}" == true ]] && wanted+=(/var/lib/docker/volumes)
+fi
 for p in "${wanted[@]+"${wanted[@]}"}"; do
   p="${p//[[:space:]]/}"
   [[ -n "$p" ]] || continue
   if [[ -e "/rootfs$p" ]]; then paths+=("/rootfs$p"); else log "WARNING $p does not exist on the host; skipped"; fi
 done
-[[ "${BACKUP_DOCKER_VOLUMES:-false}" == true ]] && paths+=(/rootfs/var/lib/docker/volumes)
 
 if [[ ${#paths[@]} -gt 0 ]]; then
   log "backing up ${paths[*]}"
   # The agent's own write-ahead log and CrowdSec's hub cache are not worth
   # keeping; a database's live files are, but see the dumps below.
-  if summary="$(restic backup --host "$HOST" --tag files --json --exclude-caches \
+  if summary="$(restic backup --host "$HOST" --tag files --tag "$RUN_LABEL" --json --exclude-caches \
                   --exclude '/rootfs/var/lib/docker/volumes/*alloy-data*' \
                   --exclude '/rootfs/var/lib/docker/volumes/*backup-cache*' \
+                  "${extra_excludes[@]+"${extra_excludes[@]}"}" \
                   "${paths[@]}" | jq -c 'select(.message_type == "summary")')" && [[ -n "$summary" ]]; then
     M[restic_backup_added_bytes]="$(jq -r '.data_added' <<<"$summary")"
     M[restic_backup_files_processed]="$(jq -r '.total_files_processed' <<<"$summary")"
@@ -205,6 +247,14 @@ while IFS='=' read -r key url; do DUMPS["${key#DB_}"]="$url"; done < <(db_vars)
 while IFS='=' read -r -d '' key value; do
   [[ "$key" =~ ^BACKUP_DB_([A-Za-z0-9_]+)$ ]] && DUMPS["${BASH_REMATCH[1]}"]="$value"
 done < <(env -0)
+# A schedule names the databases it wants; otherwise every DB_ variable.
+if [[ -n "$USING_SCHEDULE" ]]; then
+  declare -A WANTED=()
+  for d in "${SCHEDULE_DATABASES[@]+"${SCHEDULE_DATABASES[@]}"}"; do
+    upper="${d^^}"; WANTED["${upper//-/_}"]=1
+  done
+  for key in "${!DUMPS[@]}"; do [[ -n "${WANTED[$key]:-}" ]] || unset "DUMPS[$key]"; done
+fi
 if [[ "${BACKUP_DATABASES:-true}" == true ]]; then
   for key in $(printf '%s\n' "${!DUMPS[@]}" | sort); do
     name="$(db_name "DB_$key")"
@@ -219,7 +269,11 @@ if [[ "${BACKUP_DATABASES:-true}" == true ]]; then
 fi
 
 if [[ ${#paths[@]} -eq 0 && ${#DUMPS[@]} -eq 0 ]]; then
-  log "ERROR nothing to back up: set BACKUP_PATHS, BACKUP_DOCKER_VOLUMES=true or DB_ variables"
+  if [[ -n "$USING_SCHEDULE" ]]; then
+    log "ERROR schedule $RUN_LABEL has nothing to back up on this host"
+  else
+    log "ERROR nothing to back up: set BACKUP_PATHS, BACKUP_DOCKER_VOLUMES=true or DB_ variables"
+  fi
   ok=0
 fi
 
@@ -251,5 +305,23 @@ M[restic_backup_success]=$ok
 M[restic_backup_duration_seconds]=$(( $(date +%s) - started ))
 [[ "$ok" == 1 ]] && M[restic_backup_last_success_timestamp_seconds]=$started
 write_metrics
+
+# Tell the API what this run did, so the dashboard can show it. Best effort:
+# the backup itself is what matters, and the metrics carry the same facts.
+if [[ -n "${INGEST_URL:-}" && -n "${CLIENT_ID:-}" && -n "${INGEST_PASSWORD:-}" ]]; then
+  jq -nc --arg schedule "$RUN_LABEL" \
+     --arg started "$(date -u -d "@$started" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --argjson ok "$([[ $ok == 1 ]] && echo true || echo false)" \
+     --argjson added "${M[restic_backup_added_bytes]:-0}" \
+     --argjson processed "${M[restic_backup_bytes_processed]:-0}" \
+     --argjson duration "${M[restic_backup_duration_seconds]}" \
+     '{schedule: $schedule, started_at: $started, finished_at: $finished, ok: $ok,
+       summary: {added_bytes: $added, bytes_processed: $processed, duration_seconds: $duration}}' \
+    | curl --silent --show-error --max-time 30 --user "$CLIENT_ID:$INGEST_PASSWORD" \
+        -H 'Content-Type: application/json' --data-binary @- \
+        -X POST "$INGEST_URL/backup/runs?host=$HOST" >/dev/null 2>&1 || true
+fi
+
 log "run finished: $([[ $ok == 1 ]] && echo ok || echo FAILED) in ${M[restic_backup_duration_seconds]}s"
 [[ "$ok" == 1 ]]

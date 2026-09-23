@@ -377,13 +377,1074 @@
       }
     },
     {
+      "id": 100,
+      "type": "row",
+      "title": "Schedules and restores (admin)",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "table",
+      "title": "Schedules",
+      "description": "What each host backs up and when. Add one with the form beside this table.",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 13,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "backups"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://backup-api:3000/api/schedules",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "client",
+              "text": "Client",
+              "type": "string"
+            },
+            {
+              "selector": "host",
+              "text": "Host",
+              "type": "string"
+            },
+            {
+              "selector": "name",
+              "text": "Schedule",
+              "type": "string"
+            },
+            {
+              "selector": "cron",
+              "text": "Cron",
+              "type": "string"
+            },
+            {
+              "selector": "backs_up",
+              "text": "Backs up",
+              "type": "string"
+            },
+            {
+              "selector": "keep.daily",
+              "text": "Keep daily",
+              "type": "number"
+            },
+            {
+              "selector": "enabled",
+              "text": "Enabled",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Host",
+            "desc": false
+          }
+        ]
+      },
+      "transparent": false,
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {},
+            "indexByName": {
+              "Client": 0,
+              "Host": 1,
+              "Schedule": 2,
+              "Cron": 3,
+              "Backs up": 4,
+              "Keep daily": 5,
+              "Enabled": 6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "volkovlabs-form-panel",
+      "title": "Add a schedule",
+      "description": "Creates a schedule. The host's agent picks it up within a minute and runs it from then on.",
+      "gridPos": {
+        "x": 13,
+        "y": 5,
+        "w": 11,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [],
+      "options": {
+        "layout": {
+          "variant": "single",
+          "orientation": "horizontal",
+          "padding": 10,
+          "sectionVariant": "default",
+          "sections": []
+        },
+        "buttonGroup": {
+          "orientation": "center",
+          "size": "md"
+        },
+        "elements": [
+          {
+            "uid": "client",
+            "id": "client",
+            "title": "Client",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "The tenant id, as in clients.yml.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "host",
+            "id": "host",
+            "title": "Host",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "HOST_NAME of the agent that runs the backup.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "name",
+            "id": "name",
+            "title": "Name",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Short name, e.g. nightly. Unique per host.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "cron",
+            "id": "cron",
+            "title": "Cron",
+            "type": "string",
+            "value": "0 3 * * *",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Five fields, in the agent's timezone (UTC).",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "machine",
+            "id": "machine",
+            "title": "Machine",
+            "type": "boolean",
+            "value": false,
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Back up the whole filesystem, minus the obvious throwaways.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "paths",
+            "id": "paths",
+            "title": "Paths",
+            "type": "textarea",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "One absolute path per line, e.g. /etc/nginx",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "rows": 3
+          },
+          {
+            "uid": "volumes",
+            "id": "volumes",
+            "title": "Volumes",
+            "type": "textarea",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "One volume name per line.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "rows": 2
+          },
+          {
+            "uid": "databases",
+            "id": "databases",
+            "title": "Databases",
+            "type": "textarea",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "One name per line, matching a DB_<NAME> variable on the agent.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "rows": 2
+          },
+          {
+            "uid": "keep_daily",
+            "id": "keep_daily",
+            "title": "Keep daily",
+            "type": "number",
+            "value": 7,
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "min": 0,
+            "max": 365
+          },
+          {
+            "uid": "keep_weekly",
+            "id": "keep_weekly",
+            "title": "Keep weekly",
+            "type": "number",
+            "value": 4,
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "min": 0,
+            "max": 520
+          },
+          {
+            "uid": "keep_monthly",
+            "id": "keep_monthly",
+            "title": "Keep monthly",
+            "type": "number",
+            "value": 6,
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "min": 0,
+            "max": 120
+          }
+        ],
+        "initial": {
+          "method": "-",
+          "code": "",
+          "highlight": false,
+          "highlightColor": "red",
+          "contentType": "application/json"
+        },
+        "update": {
+          "method": "datasource",
+          "datasource": "backups",
+          "getPayload": "const v = context.panel.formValue();\n// One item per line in the box, comma-separated on the way out.\nconst list = (s) => (s || '').split('\\n').map((x) => x.trim()).filter((x) => x.length).join(',');\nreturn {\n  client: v.client,\n  host: v.host,\n  name: v.name,\n  cron: v.cron,\n  machine: v.machine ? 'true' : 'false',\n  paths: list(v.paths),\n  volumes: list(v.volumes),\n  databases: list(v.databases),\n  keep_daily: Number(v.keep_daily) || 0,\n  keep_weekly: Number(v.keep_weekly) || 0,\n  keep_monthly: Number(v.keep_monthly) || 0,\n};",
+          "code": "if (context.panel.response && context.panel.response.state === 'Done') {\n  context.grafana.notifySuccess(['Backups', 'Schedule saved']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Backups', 'The API refused that: ' + JSON.stringify(context.panel.response)]);\n}",
+          "payloadMode": "all",
+          "confirm": false,
+          "contentType": "application/json",
+          "url": "",
+          "header": [],
+          "payload": {
+            "refId": "A",
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://backup-api:3000/api/schedules",
+            "root_selector": "",
+            "columns": [],
+            "url_options": {
+              "method": "POST",
+              "body_type": "raw",
+              "body_content_type": "application/json",
+              "data": "{\"client\":\"${payload.client}\",\"host\":\"${payload.host}\",\"name\":\"${payload.name}\",\"cron\":\"${payload.cron}\",\"sources\":{\"machine\":\"${payload.machine}\",\"paths\":\"${payload.paths}\",\"volumes\":\"${payload.volumes}\",\"databases\":\"${payload.databases}\"},\"keep\":{\"daily\":${payload.keep_daily},\"weekly\":${payload.keep_weekly},\"monthly\":${payload.keep_monthly}}}"
+            }
+          }
+        },
+        "updateEnabled": "auto",
+        "sync": true,
+        "reset": {
+          "text": "Reset",
+          "variant": "hidden",
+          "icon": "process",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "resetAction": {
+          "mode": "initial",
+          "confirm": false,
+          "code": ""
+        },
+        "saveDefault": {
+          "text": "Save default",
+          "variant": "hidden",
+          "icon": "save"
+        },
+        "submit": {
+          "text": "Add schedule",
+          "variant": "primary",
+          "icon": "cloud-upload",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "confirmModal": {
+          "title": "Confirm",
+          "confirm": "Confirm",
+          "cancel": "Cancel",
+          "body": "Please confirm to update changed values",
+          "columns": {
+            "include": [
+              "name",
+              "oldValue",
+              "newValue"
+            ],
+            "name": "Label",
+            "oldValue": "Old Value",
+            "newValue": "New Value"
+          },
+          "elementDisplayMode": "modified"
+        },
+        "elementValueChanged": ""
+      },
+      "transparent": false
+    },
+    {
+      "id": 103,
+      "type": "table",
+      "title": "Latest backups",
+      "description": "Every snapshot the agents have reported. Pick one in the restore form beside this table to bring it back.",
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 13,
+        "h": 11
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "backups"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://backup-api:3000/api/snapshots",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "Taken",
+              "type": "timestamp"
+            },
+            {
+              "selector": "client",
+              "text": "Client",
+              "type": "string"
+            },
+            {
+              "selector": "host",
+              "text": "Host",
+              "type": "string"
+            },
+            {
+              "selector": "holds",
+              "text": "Holds",
+              "type": "string"
+            },
+            {
+              "selector": "snapshot_id",
+              "text": "Snapshot",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Taken",
+            "desc": true
+          }
+        ]
+      },
+      "transparent": false,
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {},
+            "indexByName": {
+              "Taken": 0,
+              "Client": 1,
+              "Host": 2,
+              "Holds": 3,
+              "Snapshot": 4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "volkovlabs-form-panel",
+      "title": "Restore a backup",
+      "description": "Nothing is written over. The restore lands beside the live data and only switches once it has finished; the previous data is kept as _old_<timestamp>.",
+      "gridPos": {
+        "x": 13,
+        "y": 15,
+        "w": 11,
+        "h": 11
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "backups"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://backup-api:3000/api/snapshots",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "snapshot_id",
+              "text": "Snapshot",
+              "type": "string"
+            },
+            {
+              "selector": "label",
+              "text": "Snapshot taken",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "options": {
+        "layout": {
+          "variant": "single",
+          "orientation": "horizontal",
+          "padding": 10,
+          "sectionVariant": "default",
+          "sections": []
+        },
+        "buttonGroup": {
+          "orientation": "center",
+          "size": "md"
+        },
+        "elements": [
+          {
+            "uid": "client",
+            "id": "client",
+            "title": "Client",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "host",
+            "id": "host",
+            "title": "Host",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "The host to restore on.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "snapshot",
+            "id": "snapshot",
+            "title": "Snapshot",
+            "type": "select",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Pick a snapshot. The list is what the agents last reported.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "optionsSource": "Query",
+            "queryOptions": {
+              "source": "A",
+              "value": "Snapshot",
+              "label": "Snapshot taken"
+            }
+          },
+          {
+            "uid": "kind",
+            "id": "kind",
+            "title": "Restore",
+            "type": "radio",
+            "value": "files",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "options": [
+              {
+                "id": "files",
+                "value": "files",
+                "label": "Files"
+              },
+              {
+                "id": "database",
+                "value": "database",
+                "label": "Database"
+              }
+            ]
+          },
+          {
+            "uid": "include",
+            "id": "include",
+            "title": "Only path",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Optional. Restores just this path from the snapshot.",
+            "section": "",
+            "unit": "",
+            "showIf": "const kind = context.panel.elements.find((e) => e.id === 'kind');\nreturn kind && kind.value === 'files';",
+            "disableIf": ""
+          },
+          {
+            "uid": "database",
+            "id": "database",
+            "title": "Database",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "The name as it appears in the schedule, e.g. app.",
+            "section": "",
+            "unit": "",
+            "showIf": "const kind = context.panel.elements.find((e) => e.id === 'kind');\nreturn kind && kind.value === 'database';",
+            "disableIf": ""
+          },
+          {
+            "uid": "switch_over",
+            "id": "switch_over",
+            "title": "Switch over",
+            "type": "boolean",
+            "value": true,
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Restores beside the live data first, then switches, keeping what was there as <name>_old_<timestamp>. Off leaves the restored copy beside it.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          }
+        ],
+        "initial": {
+          "method": "-",
+          "code": "",
+          "highlight": false,
+          "highlightColor": "red",
+          "contentType": "application/json"
+        },
+        "update": {
+          "method": "datasource",
+          "datasource": "backups",
+          "getPayload": "const v = context.panel.formValue();\nreturn {\n  client: v.client,\n  host: v.host,\n  snapshot: v.snapshot,\n  kind: v.kind,\n  database: v.kind === 'database' ? (v.database || '') : '',\n  include: v.kind === 'files' ? (v.include || '') : '',\n  switch_over: v.switch_over ? 'true' : 'false',\n};",
+          "code": "if (context.panel.response && context.panel.response.state === 'Done') {\n  context.grafana.notifySuccess(['Backups', 'Restore queued; the host picks it up within a minute']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Backups', 'The API refused that: ' + JSON.stringify(context.panel.response)]);\n}",
+          "payloadMode": "all",
+          "confirm": false,
+          "contentType": "application/json",
+          "url": "",
+          "header": [],
+          "payload": {
+            "refId": "A",
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://backup-api:3000/api/jobs",
+            "root_selector": "",
+            "columns": [],
+            "url_options": {
+              "method": "POST",
+              "body_type": "raw",
+              "body_content_type": "application/json",
+              "data": "{\"type\":\"restore\",\"client\":\"${payload.client}\",\"host\":\"${payload.host}\",\"snapshot_id\":\"${payload.snapshot}\",\"kind\":\"${payload.kind}\",\"database\":\"${payload.database}\",\"include\":\"${payload.include}\",\"switch\":\"${payload.switch_over}\"}"
+            }
+          }
+        },
+        "updateEnabled": "auto",
+        "sync": true,
+        "reset": {
+          "text": "Reset",
+          "variant": "hidden",
+          "icon": "process",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "resetAction": {
+          "mode": "initial",
+          "confirm": false,
+          "code": ""
+        },
+        "saveDefault": {
+          "text": "Save default",
+          "variant": "hidden",
+          "icon": "save"
+        },
+        "submit": {
+          "text": "Restore",
+          "variant": "primary",
+          "icon": "cloud-upload",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "confirmModal": {
+          "title": "Confirm",
+          "confirm": "Confirm",
+          "cancel": "Cancel",
+          "body": "Please confirm to update changed values",
+          "columns": {
+            "include": [
+              "name",
+              "oldValue",
+              "newValue"
+            ],
+            "name": "Label",
+            "oldValue": "Old Value",
+            "newValue": "New Value"
+          },
+          "elementDisplayMode": "modified"
+        },
+        "elementValueChanged": ""
+      },
+      "transparent": false
+    },
+    {
+      "id": 105,
+      "type": "table",
+      "title": "Recent actions",
+      "description": "Backups and restores asked for from here, and what came back.",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 13,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "backups"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://backup-api:3000/api/jobs",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "created_at",
+              "text": "Asked",
+              "type": "timestamp"
+            },
+            {
+              "selector": "client",
+              "text": "Client",
+              "type": "string"
+            },
+            {
+              "selector": "host",
+              "text": "Host",
+              "type": "string"
+            },
+            {
+              "selector": "type",
+              "text": "Action",
+              "type": "string"
+            },
+            {
+              "selector": "state",
+              "text": "State",
+              "type": "string"
+            },
+            {
+              "selector": "message",
+              "text": "Result",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Asked",
+            "desc": true
+          }
+        ]
+      },
+      "transparent": false,
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {},
+            "indexByName": {
+              "Asked": 0,
+              "Client": 1,
+              "Host": 2,
+              "Action": 3,
+              "State": 4,
+              "Result": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "type": "volkovlabs-form-panel",
+      "title": "Back up now",
+      "description": "Runs a schedule immediately on its host. The agent picks the job up within a minute.",
+      "gridPos": {
+        "x": 13,
+        "y": 26,
+        "w": 11,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "backups"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "backups"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://backup-api:3000/api/schedules",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "name",
+              "text": "Schedule",
+              "type": "string"
+            },
+            {
+              "selector": "host",
+              "text": "Host",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "options": {
+        "layout": {
+          "variant": "single",
+          "orientation": "horizontal",
+          "padding": 10,
+          "sectionVariant": "default",
+          "sections": []
+        },
+        "buttonGroup": {
+          "orientation": "center",
+          "size": "md"
+        },
+        "elements": [
+          {
+            "uid": "client",
+            "id": "client",
+            "title": "Client",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "host",
+            "id": "host",
+            "title": "Host",
+            "type": "string",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": ""
+          },
+          {
+            "uid": "schedule",
+            "id": "schedule",
+            "title": "Schedule",
+            "type": "select",
+            "value": "",
+            "labelWidth": 16,
+            "width": 0,
+            "tooltip": "Runs this schedule now, outside its cron.",
+            "section": "",
+            "unit": "",
+            "showIf": "",
+            "disableIf": "",
+            "optionsSource": "Query",
+            "queryOptions": {
+              "source": "A",
+              "value": "Schedule",
+              "label": "Schedule"
+            }
+          }
+        ],
+        "initial": {
+          "method": "-",
+          "code": "",
+          "highlight": false,
+          "highlightColor": "red",
+          "contentType": "application/json"
+        },
+        "update": {
+          "method": "datasource",
+          "datasource": "backups",
+          "getPayload": "const v = context.panel.formValue();\nreturn { client: v.client, host: v.host, schedule: v.schedule };",
+          "code": "if (context.panel.response && context.panel.response.state === 'Done') {\n  context.grafana.notifySuccess(['Backups', 'Backup queued']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Backups', 'The API refused that: ' + JSON.stringify(context.panel.response)]);\n}",
+          "payloadMode": "all",
+          "confirm": false,
+          "contentType": "application/json",
+          "url": "",
+          "header": [],
+          "payload": {
+            "refId": "A",
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://backup-api:3000/api/jobs",
+            "root_selector": "",
+            "columns": [],
+            "url_options": {
+              "method": "POST",
+              "body_type": "raw",
+              "body_content_type": "application/json",
+              "data": "{\"type\":\"backup\",\"client\":\"${payload.client}\",\"host\":\"${payload.host}\",\"schedule\":\"${payload.schedule}\"}"
+            }
+          }
+        },
+        "updateEnabled": "auto",
+        "sync": true,
+        "reset": {
+          "text": "Reset",
+          "variant": "hidden",
+          "icon": "process",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "resetAction": {
+          "mode": "initial",
+          "confirm": false,
+          "code": ""
+        },
+        "saveDefault": {
+          "text": "Save default",
+          "variant": "hidden",
+          "icon": "save"
+        },
+        "submit": {
+          "text": "Back up now",
+          "variant": "primary",
+          "icon": "cloud-upload",
+          "backgroundColor": "purple",
+          "foregroundColor": "yellow"
+        },
+        "confirmModal": {
+          "title": "Confirm",
+          "confirm": "Confirm",
+          "cancel": "Cancel",
+          "body": "Please confirm to update changed values",
+          "columns": {
+            "include": [
+              "name",
+              "oldValue",
+              "newValue"
+            ],
+            "name": "Label",
+            "oldValue": "Old Value",
+            "newValue": "New Value"
+          },
+          "elementDisplayMode": "modified"
+        },
+        "elementValueChanged": ""
+      },
+      "transparent": false
+    },
+    {
       "id": 6,
       "type": "row",
       "title": "Per host",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 34,
         "w": 24,
         "h": 1
       },
@@ -400,7 +1461,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 35,
         "w": 24,
         "h": 8
       },
@@ -700,7 +1761,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 43,
         "w": 24,
         "h": 1
       },
@@ -717,7 +1778,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 44,
         "w": 12,
         "h": 8
       },
@@ -868,7 +1929,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 14,
+        "y": 44,
         "w": 12,
         "h": 8
       },
@@ -916,7 +1977,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 52,
         "w": 24,
         "h": 1
       },
@@ -933,7 +1994,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 53,
         "w": 8,
         "h": 8
       },
@@ -985,7 +2046,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 23,
+        "y": 53,
         "w": 8,
         "h": 8
       },
@@ -1037,7 +2098,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 23,
+        "y": 53,
         "w": 8,
         "h": 8
       },

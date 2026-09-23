@@ -207,6 +207,9 @@ services:
       # The host, read-only: what gets backed up. Snapshot paths start with
       # /rootfs, so /rootfs/etc is the host's /etc.
       - /:/rootfs:ro
+      # The host again, writable: only restores write here, and only to the
+      # path being restored (see backup/restore.sh).
+      - /:/hostfs
       - backup-metrics:/metrics
       # restic's local cache of the repository's index; makes runs faster.
       - backup-cache:/root/.cache/restic

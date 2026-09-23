@@ -57,7 +57,10 @@ and alerts. See [docs/crowdsec.md](docs/crowdsec.md).
 Backups work the same way: add `backup` to `COMPOSE_PROFILES` and say where to
 store them (`RESTIC_REPOSITORY`), and restic backs that server up every night,
 including a consistent dump of every monitored database. Every run is
-reported, and a failed or missing backup raises an alert. See
+reported, and a failed or missing backup raises an alert. From the Backups
+dashboard you add schedules per host — the whole machine, paths, volumes or
+databases — start a backup now, and restore a snapshot, which lands beside
+the live data and switches over only once it has finished. See
 [docs/backups.md](docs/backups.md).
 
 ## What you need
@@ -312,6 +315,7 @@ docker-compose.yml           the stack as Dokploy runs it
 docker-compose.dev.yml       the same stack for your own computer
 docker-compose.clients.yml   generated: one metrics filter per client
 agent/                       what runs on each monitored server
+api/                         backup control API: schedules, jobs, restores (Fastify + SQLite)
 config/                      Prometheus, Alertmanager, Loki, Grafana and ingest settings
   loki/security.rules.yml    the security alerts, copied per client by `make generate`
 generated/                   generated: input for the Grafana setup

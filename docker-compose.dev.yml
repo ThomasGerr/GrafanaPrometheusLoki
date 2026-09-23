@@ -160,6 +160,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Backup control (the Backups dashboard drives this) ─────────────────────
+  # Schedules, the job queue and run history for every agent's backups.
+  # Agents poll it through the ingest gateway; nothing reaches into a
+  # monitored server. The dashboard side needs BACKUP_API_TOKEN, which only
+  # the admin Org's data source has.
+  backup-api:
+    build: ./api
+    image: grafana-prometheus-loki/backup-api
+    container_name: em-backup-api
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      ADMIN_TOKEN: ${BACKUP_API_TOKEN:?BACKUP_API_TOKEN is required}
+      DB_PATH: /data/backups.db
+    volumes:
+      - backup-api-data:/data
+    networks: [monitor]
+    ports:
+      - "127.0.0.1:${BACKUP_API_PORT:-3010}:3000"
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   # ── Dashboards (one Org per client) ────────────────────────────────────────
   grafana:
     image: grafana/grafana:13.1.4
@@ -174,6 +201,11 @@ services:
       GF_USERS_ALLOW_ORG_CREATE: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_DEFAULT_THEME: light
+      # The production image bakes these in; here Grafana runs upstream with
+      # the config mounted, so it fetches them at start-up instead.
+      GF_INSTALL_PLUGINS: "yesoreyeram-infinity-datasource 4.0.0,volkovlabs-form-panel 6.3.5"
+      # The token the Backups dashboard manages schedules and restores with.
+      BACKUP_API_TOKEN: ${BACKUP_API_TOKEN:?BACKUP_API_TOKEN is required}
       # Clients are Viewers; stop them from wandering out of their dashboards.
       GF_EXPLORE_ENABLED: "true"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
@@ -213,6 +245,7 @@ services:
       start_period: 30s
 
 volumes:
+  backup-api-data:
   prometheus-data:
   alertmanager-data:
   loki-data:

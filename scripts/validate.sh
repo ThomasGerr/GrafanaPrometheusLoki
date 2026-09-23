@@ -131,7 +131,7 @@ for f in docker-compose.yml docker-compose.dev.yml agent/docker-compose.yml; do
   # Dummy values for what the stack requires at start, so the check does not
   # depend on a local .env (a fresh clone has none).
   if out=$(cd "$dir" && CLIENT_ID=x HOST_NAME=x INGEST_URL=x INGEST_PASSWORD=x RENDERER_TOKEN=x \
-            docker compose -f "$base" config -q 2>&1); then
+            BACKUP_API_TOKEN=x docker compose -f "$base" config -q 2>&1); then
     ok "$f"
   else
     bad "$f"; echo "$out" | sed 's/^/       /'
@@ -148,7 +148,7 @@ fi
 # Dokploy builds these on every deploy; a Dockerfile that COPYs a file that
 # is not there should fail here, not on the server.
 step "Production images"
-if out=$(RENDERER_TOKEN=x docker compose -f docker-compose.yml build --quiet 2>&1); then
+if out=$(RENDERER_TOKEN=x BACKUP_API_TOKEN=x docker compose -f docker-compose.yml build --quiet 2>&1); then
   ok "every service in docker-compose.yml builds"
 else
   bad "production image build"; echo "$out" | grep -v "level=warning" | tail -15 | sed 's/^/       /'
@@ -167,6 +167,20 @@ for image in engine bouncer; do
     bad "agent/crowdsec/$image.Dockerfile"; echo "$out" | tail -15 | sed 's/^/       /'
   fi
 done
+
+# ── Backup control API ─────────────────────────────────────────────────────
+# The API the Backups dashboard drives: schedules, the job queue and restores.
+# Its tests cover who may ask for what, which is the part that must not slip.
+step "Backup control API"
+# The sources are copied in rather than mounted: node_modules built on this
+# machine would be the wrong platform inside the container.
+if out=$(docker run --rm -v "$PWD/api:/src:ro" node:22-alpine \
+          sh -c "cp -r /src /app && cd /app && rm -rf node_modules \
+                 && npm install --silent --no-audit --no-fund >/dev/null 2>&1 && npm test" 2>&1); then
+  ok "$(grep -E '^# (tests|pass)' <<<"$out" | tr '\n' ' ')"
+else
+  bad "api tests"; echo "$out" | tail -25 | sed 's/^/       /'
+fi
 
 # ── Dashboards ─────────────────────────────────────────────────────────────
 step "Grafana dashboards"

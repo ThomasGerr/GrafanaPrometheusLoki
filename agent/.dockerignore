@@ -6,3 +6,5 @@
 !lib/db-url.sh
 !backup/backup.sh
 !backup/backup-entrypoint.sh
+!backup/restore.sh
+!backup/poll.sh

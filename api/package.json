@@ -1,0 +1,12 @@
+{
+  "name": "grafana-prometheus-loki-backup-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": { "start": "node src/server.js", "test": "node --test test/*.test.js" },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "better-sqlite3": "^11.8.1"
+  }
+}
