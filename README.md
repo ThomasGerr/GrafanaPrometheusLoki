@@ -31,7 +31,7 @@ need to open a port on a client's firewall.
 
 | | |
 |---|---|
-| **Servers** | CPU, memory, disk (including "will be full within 24h"), load, network, clock drift, reboots |
+| **Servers** | CPU, memory, disk (including "will be full within 24h"), load, network, clock drift, reboots, and which processes are using the CPU and memory |
 | **Containers** | CPU and memory per container, restart loops, out-of-memory kills, containers that disappear |
 | **Websites** | Whether it is up, how fast it responds, HTTP status, when the TLS certificate expires |
 | **Databases** | PostgreSQL/Supabase, MySQL/MariaDB, Redis, MongoDB, SQL Server: whether it is reachable, connection pool use, load, cache hit ratio, size, replication, deadlocks |

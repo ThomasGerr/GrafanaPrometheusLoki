@@ -1,9 +1,9 @@
 # Installing the agent
 
-Every monitored server runs the agent: one container that sends host and
-container metrics and logs to the central stack, plus, if you want them,
-database monitoring and CrowdSec. It only connects outbound, so there is
-nothing to open on the server's firewall.
+Every monitored server runs the agent: one container that sends host,
+process and container metrics and logs to the central stack, plus, if you
+want them, database monitoring and CrowdSec. It only connects outbound, so
+there is nothing to open on the server's firewall.
 
 The agent is `agent/docker-compose.yml`, configured entirely by environment
 variables. There are two ways to deploy it, and both give the same result:
@@ -114,3 +114,11 @@ its firewall rules.
 Measured on a host running 21 containers: about 5% of one core, 180 MiB of
 memory and 90 MB a day of upload, plus whatever its logs add. Databases add
 almost nothing. CrowdSec, when on, adds about 110 MiB.
+
+Host processes are grouped by program name, which costs seven series per
+distinct program — on a host with 40 of them, 280 series. Reading `/proc`
+for every process takes about 85 ms against 17 ms for the host's own
+metrics, which is why processes are scraped once a minute rather than twice.
+Per-process memory is read from `/proc/<pid>/stat`; the far more expensive
+`smaps` is switched off, so what you see is resident memory, not the
+proportional set size.

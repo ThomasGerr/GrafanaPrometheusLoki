@@ -26,7 +26,7 @@ groups:
 
       # Agent is alive but one of its collectors is failing.
       - alert: HostExporterFailing
-        expr: up{job=~"node|cadvisor"} == 0
+        expr: up{job=~"node|cadvisor|process"} == 0
         for: 10m
         labels:
           severity: warning
@@ -91,6 +91,22 @@ groups:
           summary: "{{ $labels.instance }} is swapping heavily"
           description: "Over half of swap is in use. Expect latency across everything on this host."
           runbook: "docs/alert-runbook.md#hostswapping"
+
+      # ── Processes ────────────────────────────────────────────────────────
+      # Every process needs a PID, and the kernel has a fixed supply. Run out
+      # and nothing new starts: no SSH in, no container restart, no cron job.
+      - alert: HostNearPidLimit
+        expr: |
+          node_processes_pids / node_processes_max_processes * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is running out of process IDs"
+          description: >-
+            {{ $value | printf "%.0f" }}% of this host's process IDs are in use.
+            At 100% nothing new can start, including a shell to fix it with.
+          runbook: "docs/alert-runbook.md#hostnearpidlimit"
 
       # ── Disk ─────────────────────────────────────────────────────────────
       - alert: HostDiskSpaceLow

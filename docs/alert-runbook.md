@@ -81,6 +81,26 @@ More than half of swap in use for 20 minutes. Everything on the host gets
 slower, often dramatically. Treat it as **HostHighMemory** that has already
 started hurting.
 
+### HostNearPidLimit
+
+Over 80% of the host's process IDs are in use. At 100% the kernel refuses to
+start anything: no new container, no cron job, and no SSH session to fix it
+from. Act on this one before it reaches the limit.
+
+Find what is multiplying — the **Processes** section of the Host Overview
+dashboard sorts by process count, or on the host:
+
+```bash
+ps -eo comm= | sort | uniq -c | sort -rn | head   # which program, how many
+cat /proc/sys/kernel/pid_max                      # the ceiling
+```
+
+It is nearly always one program forking without limit: a crashing service
+being restarted in a loop, a runaway worker pool, or a fork bomb. Restarting
+that one service usually clears it. Raising `pid_max` buys time but does not
+fix the cause, and a container doing this should get a `pids_limit` so it
+cannot take the host down with it.
+
 ### HostDiskSpaceLow
 
 (and **HostDiskSpaceCritical** — the same alert at 95%)

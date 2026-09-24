@@ -31,7 +31,7 @@ prometheus.exporter.unix "host" {
   // no rule or panel uses — each one costs scrape time here and 30 days of
   // storage centrally. Add a collector here, and its metrics to
   // prometheus.relabel "keep" below, before querying anything new.
-  set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "stat", "time", "timex", "textfile"]
+  set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "processes", "stat", "time", "timex", "textfile"]
 
   // The backup service's results (restic_*), when backups are on.
   textfile {
@@ -78,6 +78,28 @@ prometheus.exporter.cadvisor "containers" {
   enabled_metrics = ["cpu", "memory", "network", "oom_event"]
 }
 
+// Host processes, grouped by executable name. Containers give a per-container
+// view of CPU and memory; this is the same view of the machine itself, which
+// is the only way to see a runaway process that belongs to no container.
+//
+// Every process is grouped under its own name, so the cost is one small set
+// of series per distinct program, not per PID. Processes inside containers
+// are visible here too: the agent reads the host's /proc.
+prometheus.exporter.process "processes" {
+  procfs_path = "/rootfs/proc"
+
+  // Reading /proc/<pid>/smaps_rollup for every process on every scrape is by
+  // far the most expensive thing this exporter can do, and the resident and
+  // virtual figures below come from the cheap /proc/<pid>/stat instead.
+  gather_smaps = false
+
+  matcher {
+    // Anything with a command line: every process, named after its binary.
+    cmdline = [".+"]
+    name    = "{{.Comm}}"
+  }
+}
+
 // Alloy's own health. Only `up` and the version leave the host (see
 // prometheus.relabel "keep"); the rest is there for the local UI.
 prometheus.exporter.self "agent" {}
@@ -98,6 +120,18 @@ discovery.relabel "host_metrics" {
   rule {
     target_label = "job"
     replacement  = "node"
+  }
+}
+
+discovery.relabel "process_metrics" {
+  targets = prometheus.exporter.process.processes.targets
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("HOST_NAME")
+  }
+  rule {
+    target_label = "job"
+    replacement  = "process"
   }
 }
 
@@ -141,6 +175,16 @@ prometheus.scrape "containers" {
   scrape_interval = "30s"
 }
 
+prometheus.scrape "processes" {
+  targets         = discovery.relabel.process_metrics.output
+  forward_to      = [prometheus.relabel.keep.receiver]
+  job_name        = "process"
+  // Half as often as the host itself: walking /proc costs more than reading
+  // a handful of counters, and which program is busy does not change from
+  // one half-minute to the next.
+  scrape_interval = "60s"
+}
+
 prometheus.scrape "agent" {
   targets         = discovery.relabel.agent_metrics.output
   forward_to      = [prometheus.relabel.keep.receiver]
@@ -162,9 +206,17 @@ prometheus.scrape "agent" {
 prometheus.relabel "keep" {
   forward_to = [prometheus.remote_write.central.receiver]
 
+  // Every process reports resident, virtual and swapped memory. Virtual is
+  // address space rather than memory in use, and nothing here asks about it.
+  rule {
+    source_labels = ["__name__", "memtype"]
+    regex         = "namedprocess_namegroup_memory_bytes;virtual"
+    action        = "drop"
+  }
+
   rule {
     source_labels = ["__name__"]
-    regex         = "up|alloy_build_info|node_(boot_time_seconds|cpu_seconds_total|disk_(read|written)_bytes_total|filesystem_(avail_bytes|files|files_free|readonly|size_bytes)|load1|load5|load15|memory_(Buffers|Cached|MemAvailable|MemTotal|SwapFree|SwapTotal)_bytes|network_(receive|transmit)_bytes_total|time_seconds|timex_offset_seconds)|restic_[a-z_]+|container_(cpu_usage_seconds_total|last_seen|memory_working_set_bytes|network_(receive|transmit)_bytes_total|oom_events_total|spec_memory_limit_bytes|start_time_seconds)"
+    regex         = "up|alloy_build_info|node_(boot_time_seconds|cpu_seconds_total|disk_(read|written)_bytes_total|filesystem_(avail_bytes|files|files_free|readonly|size_bytes)|load1|load5|load15|memory_(Buffers|Cached|MemAvailable|MemTotal|SwapFree|SwapTotal)_bytes|network_(receive|transmit)_bytes_total|processes_(max_processes|pids)|time_seconds|timex_offset_seconds)|namedprocess_namegroup_(cpu_seconds_total|memory_bytes|num_procs|num_threads|open_filedesc)|restic_[a-z_]+|container_(cpu_usage_seconds_total|last_seen|memory_working_set_bytes|network_(receive|transmit)_bytes_total|oom_events_total|spec_memory_limit_bytes|start_time_seconds)"
     action        = "keep"
   }
 }
