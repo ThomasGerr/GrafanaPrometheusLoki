@@ -74,6 +74,11 @@ services:
       - host.docker.internal:host-gateway
     networks: [default, agent-db, databases]
 
+    # The host's cgroup namespace, not a private one. Without it every
+    # process's cgroup reads as a relative path, so neither cAdvisor nor the
+    # runtime mapper can tell a container's processes from the host's own.
+    cgroup: host
+
     volumes:
       # Write-ahead log. Metrics survive a central outage and replay on
       # reconnect, so a maintenance window leaves no gap in the graphs.

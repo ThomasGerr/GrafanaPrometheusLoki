@@ -406,7 +406,7 @@
       "gridPos": {
         "x": 0,
         "y": 5,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -462,9 +462,9 @@
       "title": "Top containers by CPU",
       "description": "CPU used over the last five minutes, as a percentage of one core.",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 5,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {
@@ -585,7 +585,7 @@
       "gridPos": {
         "x": 0,
         "y": 14,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -641,9 +641,9 @@
       "title": "Top containers by memory",
       "description": "Memory each container holds (working set).",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 14,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {
@@ -764,7 +764,7 @@
       "gridPos": {
         "x": 0,
         "y": 23,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -829,9 +829,9 @@
       "title": "Top containers by network",
       "description": "In and out together, over the last five minutes.",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 23,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {
@@ -952,7 +952,7 @@
       "gridPos": {
         "x": 0,
         "y": 32,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -1008,9 +1008,9 @@
       "title": "Most restarted containers",
       "description": "Restarts over the dashboard's time range.",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 32,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {

@@ -624,7 +624,7 @@
       "gridPos": {
         "x": 0,
         "y": 9,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -678,11 +678,11 @@
       "id": 206,
       "type": "table",
       "title": "Top processes by CPU",
-      "description": "CPU used over the last five minutes, as a percentage of one core. Grouped by program, so four workers of the same name count together.",
+      "description": "CPU used over the last five minutes, as a percentage of one core. Grouped by program, so four workers of the same name count together, and Runtime says how they are started.",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 9,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {
@@ -695,7 +695,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(15, sum by (groupname, instance) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
+          "expr": "topk(15, (sum by (groupname, instance) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100 * on (groupname, instance) group_left(runtime) topk by (groupname, instance) (1, process_runtime_info{client=~\"$client\", instance=~\"$instance\"})) or (sum by (groupname, instance) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100 unless on (groupname, instance) topk by (groupname, instance) (1, process_runtime_info{client=~\"$client\", instance=~\"$instance\"})))",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -757,6 +757,18 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runtime"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
           }
         ]
       },
@@ -784,12 +796,14 @@
             "renameByName": {
               "groupname": "Process",
               "instance": "Host",
-              "Value": "CPU"
+              "Value": "CPU",
+              "runtime": "Runtime"
             },
             "indexByName": {
               "groupname": 0,
               "instance": 1,
-              "Value": 2
+              "runtime": 2,
+              "Value": 3
             }
           }
         }
@@ -803,7 +817,7 @@
       "gridPos": {
         "x": 0,
         "y": 18,
-        "w": 12,
+        "w": 10,
         "h": 9
       },
       "datasource": {
@@ -857,11 +871,11 @@
       "id": 208,
       "type": "table",
       "title": "Top processes by memory",
-      "description": "Memory each program actually holds (resident).",
+      "description": "Memory each program actually holds (resident), and how it is started.",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 18,
-        "w": 12,
+        "w": 14,
         "h": 9
       },
       "datasource": {
@@ -874,7 +888,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(15, sum by (groupname, instance) (namedprocess_namegroup_memory_bytes{memtype=\"resident\", client=~\"$client\", instance=~\"$instance\"}))",
+          "expr": "topk(15, (sum by (groupname, instance) (namedprocess_namegroup_memory_bytes{memtype=\"resident\", client=~\"$client\", instance=~\"$instance\"}) * on (groupname, instance) group_left(runtime) topk by (groupname, instance) (1, process_runtime_info{client=~\"$client\", instance=~\"$instance\"})) or (sum by (groupname, instance) (namedprocess_namegroup_memory_bytes{memtype=\"resident\", client=~\"$client\", instance=~\"$instance\"}) unless on (groupname, instance) topk by (groupname, instance) (1, process_runtime_info{client=~\"$client\", instance=~\"$instance\"})))",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -936,6 +950,18 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runtime"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
           }
         ]
       },
@@ -963,12 +989,14 @@
             "renameByName": {
               "groupname": "Process",
               "instance": "Host",
-              "Value": "Memory"
+              "Value": "Memory",
+              "runtime": "Runtime"
             },
             "indexByName": {
               "groupname": 0,
               "instance": 1,
-              "Value": 2
+              "runtime": 2,
+              "Value": 3
             }
           }
         }

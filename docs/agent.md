@@ -113,6 +113,12 @@ offers — and it has two limits worth knowing:
 - Everything sharing a binary shares a row. Ten pm2-managed apps are all
   `node`, and every Python service is `python3`.
 
+The list also says how each group is **run** — `docker`, `systemd`, `pm2`,
+`user` (someone's shell) or `host` — which is the quickest way to find out
+what starts something on a server nobody has documented. The agent works
+that out from each process's cgroup, since the exporter cannot see it, and
+reports it as `process_runtime_info`.
+
 `PROCESS_GROUP_<NAME>` gives a group its own name by matching the command
 line instead:
 
@@ -133,7 +139,9 @@ ps -eo pid,comm,args --sort=-pcpu | head -30
 
 The agent writes these into `/etc/alloy/processes.alloy` at start-up and logs
 each one, so `docker logs grafana-prometheus-loki-agent | grep 'reported as'` says what
-it made of them.
+it made of them. `agent/runtime-map.sh` groups processes by the same patterns
+when it works out where each group runs, so a named group keeps its name in
+the Runtime column.
 
 ## Logs from files
 

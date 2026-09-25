@@ -8,3 +8,4 @@
 !backup/backup-entrypoint.sh
 !backup/restore.sh
 !backup/poll.sh
+!runtime-map.sh

@@ -5,5 +5,7 @@
 FROM grafana/alloy:v1.19.0
 COPY config.alloy databases.alloy crowdsec.alloy /etc/alloy/
 COPY lib/db-url.sh /usr/local/lib/db-url.sh
-COPY entrypoint.sh /usr/local/bin/agent-entrypoint
+# --chmod, so the scripts run whatever mode they were checked out with.
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/agent-entrypoint
+COPY --chmod=0755 runtime-map.sh /usr/local/bin/agent-runtime-map
 ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]

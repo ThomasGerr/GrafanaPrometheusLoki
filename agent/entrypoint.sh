@@ -27,6 +27,9 @@ set -uo pipefail
 CONNECTIONS=/etc/alloy/connections.alloy
 PROCESSES=/etc/alloy/processes.alloy
 LOGFILES=/etc/alloy/logfiles.alloy
+# The same grouping rules again, for runtime-map.sh to group processes the
+# way the exporter does.
+GROUP_FILE=/run/process-groups.tsv
 SECRETS=/run/agent-secrets
 # shellcheck source=lib/db-url.sh
 . /usr/local/lib/db-url.sh
@@ -158,6 +161,7 @@ fi
 } > "$PROCESSES"
 
 named=0
+: > "$GROUP_FILE"
 while IFS='=' read -r -d '' key pattern; do
   [[ "$key" =~ ^PROCESS_GROUP_[A-Za-z0-9_]+$ ]] || continue
   name="${key#PROCESS_GROUP_}"
@@ -177,6 +181,7 @@ while IFS='=' read -r -d '' key pattern; do
     echo "    name    = \"$name\""
     echo "  }"
   } >> "$PROCESSES"
+  printf '%s\t%s\n' "$pattern" "$name" >> "$GROUP_FILE"
   log "processes matching '$pattern' are reported as '$name'"
   named=$((named + 1))
 done < <(env -0 | sort -z)
@@ -253,5 +258,10 @@ if [[ ${#targets[@]} -gt 0 ]]; then
   } > "$LOGFILES"
   log "${#targets[@]} log file pattern(s)"
 fi
+
+# How each group of processes is run — container, service, pm2, shell — as a
+# textfile metric the host collector picks up. In the background: it reads
+# /proc on its own schedule, and the agent must not wait for it.
+/usr/local/bin/agent-runtime-map &
 
 exec /bin/alloy "$@"
