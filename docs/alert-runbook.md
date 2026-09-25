@@ -63,7 +63,7 @@ Load average is more than twice the core count, normalised so the number means
 the same on every machine size.
 
 High load with low CPU means processes are blocked on I/O, not compute. Check
-the disk throughput panel on **Host Overview** and look for a database doing
+the disk throughput panel on **Storage & Network** and look for a database doing
 unindexed scans or a backup job running in the foreground.
 
 ### HostHighMemory
