@@ -88,6 +88,7 @@ afterwards, or it will start again next to the new one.
 | `BACKUP_PATHS`, `BACKUP_DOCKER_VOLUMES` | What to back up besides the databases: host directories, and `true` for every Docker volume. |
 | `BACKUP_DB_<NAME>` | The user a database's dump connects as, when its `DB_<NAME>` user may not read the data. |
 | `PROCESS_GROUP_<NAME>` | Processes whose command line matches this regular expression are reported as `<name>`. See [Naming processes](#naming-processes). |
+| `LOG_FILE_<NAME>` | A host log file or glob to read, for programs that log to files rather than to the journal or a container. See [Logs from files](#logs-from-files). |
 | `CONTAINERD_DIR` | Where containerd's socket lives, if not `/run/containerd`. |
 | `BACKUP_SCHEDULE`, `BACKUP_KEEP_*`, `BACKUP_MAX_AGE_HOURS` | When and how long to keep; see [backups.md](backups.md#settings). Schedules added from the dashboard take over from `BACKUP_SCHEDULE`. |
 
@@ -133,6 +134,33 @@ ps -eo pid,comm,args --sort=-pcpu | head -30
 The agent writes these into `/etc/alloy/processes.alloy` at start-up and logs
 each one, so `docker logs grafana-prometheus-loki-agent | grep 'reported as'` says what
 it made of them.
+
+## Logs from files
+
+Container logs and the systemd journal are collected without being asked
+for. A program that writes its own log file is in neither: pm2 writes to
+`~/.pm2/logs/`, and anything started from `rc.local` or a shell script
+usually writes wherever it was told to. `LOG_FILE_<NAME>` reads those:
+
+```
+LOG_FILE_PM2=/home/deploy/.pm2/logs/*.log
+LOG_FILE_NGINX=/var/log/nginx/*.log
+```
+
+Each line arrives labelled `program="pm2"` — the same label the journal's
+entries carry, so they appear in the Logs dashboard's **Program** filter
+beside `sshd` and `sudo` — and `filename` with the file's path on the host,
+which is what tells one pm2 app from another. The level is read from the
+line as usual, so they count towards the error tables too.
+
+Files are re-checked every 30 seconds, so a glob picks up files that appear
+later, and reading starts at the end of each file: a log that has been
+written to for months is not replayed on the first start.
+
+If nothing arrives from a host at all, check the journal first. `JOURNAL_DIR`
+defaults to `/var/log/journal`, and a host whose journald keeps logs only in
+memory has nothing there — its logs are in `/run/log/journal`, and the agent
+reads an empty directory until it is pointed at them.
 
 ## Removing
 

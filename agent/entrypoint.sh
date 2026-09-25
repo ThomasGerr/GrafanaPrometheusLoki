@@ -9,6 +9,8 @@
 #   PROCESS_GROUP_<NAME>     processes whose command line matches this regular
 #                            expression are reported as <name>, e.g.
 #                            PROCESS_GROUP_API='node .*/api/server\.js'
+#   LOG_FILE_<NAME>          host log files to read, as a path or glob, e.g.
+#                            LOG_FILE_PM2=/home/deploy/.pm2/logs/*.log
 #   COMPOSE_PROFILES         containing "crowdsec": collect CrowdSec's metrics;
 #                            without "backup": clear old backup results
 #
@@ -24,6 +26,7 @@ set -uo pipefail
 
 CONNECTIONS=/etc/alloy/connections.alloy
 PROCESSES=/etc/alloy/processes.alloy
+LOGFILES=/etc/alloy/logfiles.alloy
 SECRETS=/run/agent-secrets
 # shellcheck source=lib/db-url.sh
 . /usr/local/lib/db-url.sh
@@ -188,5 +191,67 @@ done < <(env -0 | sort -z)
   echo "}"
 } >> "$PROCESSES"
 [[ "$named" == 0 ]] || log "$named named process group(s)"
+
+# ── Generate logfiles.alloy ─────────────────────────────────────────────────
+# Docker containers and the systemd journal are read without being asked. A
+# program that writes its own log file — pm2, or anything started from
+# rc.local — is invisible to both, so LOG_FILE_<NAME> names files to read.
+# They are labelled program="<name>", which is the label the Logs dashboard
+# already filters journal entries by.
+rm -f "$LOGFILES"
+targets=()
+while IFS='=' read -r -d '' key glob; do
+  [[ "$key" =~ ^LOG_FILE_[A-Za-z0-9_]+$ ]] || continue
+  name="${key#LOG_FILE_}"
+  name="$(tr '[:upper:]_' '[:lower:]-' <<<"$name")"
+  if [[ "$glob" != /* || "$glob" == *..* || "$glob" == *'"'* ]]; then
+    log "ERROR skipping $key: '$glob' must be an absolute path, without .. or quotes"
+    continue
+  fi
+  # The host's filesystem is mounted read-only at /rootfs, so that is where
+  # its paths are from in here.
+  targets+=("    {__path__ = \"/rootfs$glob\", client = \"$CLIENT_ID\", instance = \"$HOST_NAME\", job = \"file\", program = \"$name\"},")
+  log "reading $glob as '$name'"
+done < <(env -0 | sort -z)
+
+if [[ ${#targets[@]} -gt 0 ]]; then
+  {
+    echo "// Generated at start-up by entrypoint.sh from the LOG_FILE_* variables."
+    echo
+    echo 'local.file_match "extra" {'
+    echo "  path_targets = ["
+    printf '%s\n' "${targets[@]}"
+    echo "  ]"
+    echo
+    echo "  // Files come and go (pm2 rotates, a deploy makes new ones), so the"
+    echo "  // set is re-read rather than fixed at start-up."
+    echo '  sync_period = "30s"'
+    echo "}"
+    echo
+    echo 'loki.source.file "extra" {'
+    echo "  targets    = local.file_match.extra.targets"
+    echo "  forward_to = [loki.relabel.extra.receiver]"
+    echo
+    echo "  // From the end: a log file that has been written to for months"
+    echo "  // would otherwise be replayed in full the first time it is read."
+    echo "  tail_from_end = true"
+    echo "}"
+    echo
+    echo "// The host's filesystem is mounted at /rootfs, which is the agent's"
+    echo "// business and not the reader's: the filename label says where the"
+    echo "// file is on the host."
+    echo 'loki.relabel "extra" {'
+    echo "  forward_to = [loki.process.enrich.receiver]"
+    echo
+    echo "  rule {"
+    echo '    source_labels = ["filename"]'
+    echo '    regex         = "/rootfs(.*)"'
+    echo '    target_label  = "filename"'
+    echo '    replacement   = "$1"'
+    echo "  }"
+    echo "}"
+  } > "$LOGFILES"
+  log "${#targets[@]} log file pattern(s)"
+fi
 
 exec /bin/alloy "$@"
