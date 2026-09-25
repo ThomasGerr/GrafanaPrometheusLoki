@@ -372,287 +372,13 @@
       }
     },
     {
-      "id": 6,
-      "type": "row",
-      "title": "Compute",
-      "collapsed": false,
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 24,
-        "h": 1
-      },
-      "panels": []
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "CPU usage",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 5,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
-          "refId": "A",
-          "legendFormat": "{{instance}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Memory usage",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 5,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "(1 - node_memory_MemAvailable_bytes{client=~\"$client\", instance=~\"$instance\"} / node_memory_MemTotal_bytes{client=~\"$client\", instance=~\"$instance\"}) * 100",
-          "refId": "A",
-          "legendFormat": "{{instance}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Load average (per core)",
-      "description": "Normalised by core count: 1.0 means fully busy, above 2.0 means queueing.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 13,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_load1{client=~\"$client\", instance=~\"$instance\"} / on (client, instance) group_left count by (client, instance) (node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"})",
-          "refId": "A",
-          "legendFormat": "{{instance}} 1m"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_load15{client=~\"$client\", instance=~\"$instance\"} / on (client, instance) group_left count by (client, instance) (node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"})",
-          "refId": "B",
-          "legendFormat": "{{instance}} 15m"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "Memory breakdown",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 13,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_memory_MemTotal_bytes{client=~\"$client\", instance=~\"$instance\"} - node_memory_MemAvailable_bytes{client=~\"$client\", instance=~\"$instance\"}",
-          "refId": "A",
-          "legendFormat": "{{instance}} used"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_memory_Cached_bytes{client=~\"$client\", instance=~\"$instance\"} + node_memory_Buffers_bytes{client=~\"$client\", instance=~\"$instance\"}",
-          "refId": "B",
-          "legendFormat": "{{instance}} cache"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_memory_SwapTotal_bytes{client=~\"$client\", instance=~\"$instance\"} - node_memory_SwapFree_bytes{client=~\"$client\", instance=~\"$instance\"}",
-          "refId": "C",
-          "legendFormat": "{{instance}} swap"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 200,
       "type": "row",
       "title": "Processes",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 4,
         "w": 24,
         "h": 1
       },
@@ -665,7 +391,7 @@
       "description": "How many processes are running on the selected hosts.",
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 5,
         "w": 6,
         "h": 4
       },
@@ -723,7 +449,7 @@
       "description": "Threads across all of them. A process multiplying out of control often shows here first.",
       "gridPos": {
         "x": 6,
-        "y": 22,
+        "y": 5,
         "w": 6,
         "h": 4
       },
@@ -781,7 +507,7 @@
       "description": "Process IDs in use against the kernel's limit. Near 100% nothing new can start on that host.",
       "gridPos": {
         "x": 12,
-        "y": 22,
+        "y": 5,
         "w": 6,
         "h": 4
       },
@@ -839,7 +565,7 @@
       "description": "File descriptors held by all processes. A steady climb is a leak.",
       "gridPos": {
         "x": 18,
-        "y": 22,
+        "y": 5,
         "w": 6,
         "h": 4
       },
@@ -897,7 +623,7 @@
       "description": "The ten busiest programs, as a percentage of one core. This is where a spike in the CPU graph above gets a name.",
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 9,
         "w": 12,
         "h": 9
       },
@@ -955,7 +681,7 @@
       "description": "CPU used over the last five minutes, as a percentage of one core. Grouped by program, so four workers of the same name count together.",
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 9,
         "w": 12,
         "h": 9
       },
@@ -1076,7 +802,7 @@
       "description": "The ten programs holding the most memory.",
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 18,
         "w": 12,
         "h": 9
       },
@@ -1134,7 +860,7 @@
       "description": "Memory each program actually holds (resident).",
       "gridPos": {
         "x": 12,
-        "y": 35,
+        "y": 18,
         "w": 12,
         "h": 9
       },
@@ -1255,7 +981,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 44,
+        "y": 27,
         "w": 24,
         "h": 1
       },
@@ -1272,7 +998,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 45,
+        "y": 28,
         "w": 12,
         "h": 8
       },
@@ -1331,7 +1057,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 45,
+        "y": 28,
         "w": 12,
         "h": 8
       },
@@ -1397,7 +1123,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 53,
+        "y": 36,
         "w": 12,
         "h": 8
       },
@@ -1463,7 +1189,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 53,
+        "y": 36,
         "w": 12,
         "h": 8
       },
@@ -1629,6 +1355,280 @@
         "showHeader": true,
         "footer": {
           "show": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Compute",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "CPU usage",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
+          "refId": "A",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Memory usage",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(1 - node_memory_MemAvailable_bytes{client=~\"$client\", instance=~\"$instance\"} / node_memory_MemTotal_bytes{client=~\"$client\", instance=~\"$instance\"}) * 100",
+          "refId": "A",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Load average (per core)",
+      "description": "Normalised by core count: 1.0 means fully busy, above 2.0 means queueing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_load1{client=~\"$client\", instance=~\"$instance\"} / on (client, instance) group_left count by (client, instance) (node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"})",
+          "refId": "A",
+          "legendFormat": "{{instance}} 1m"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_load15{client=~\"$client\", instance=~\"$instance\"} / on (client, instance) group_left count by (client, instance) (node_cpu_seconds_total{mode=\"idle\", client=~\"$client\", instance=~\"$instance\"})",
+          "refId": "B",
+          "legendFormat": "{{instance}} 15m"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Memory breakdown",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_memory_MemTotal_bytes{client=~\"$client\", instance=~\"$instance\"} - node_memory_MemAvailable_bytes{client=~\"$client\", instance=~\"$instance\"}",
+          "refId": "A",
+          "legendFormat": "{{instance}} used"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_memory_Cached_bytes{client=~\"$client\", instance=~\"$instance\"} + node_memory_Buffers_bytes{client=~\"$client\", instance=~\"$instance\"}",
+          "refId": "B",
+          "legendFormat": "{{instance}} cache"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_memory_SwapTotal_bytes{client=~\"$client\", instance=~\"$instance\"} - node_memory_SwapFree_bytes{client=~\"$client\", instance=~\"$instance\"}",
+          "refId": "C",
+          "legendFormat": "{{instance}} swap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     }
