@@ -777,7 +777,7 @@
       "gridPos": {
         "x": 0,
         "y": 24,
-        "w": 10,
+        "w": 8,
         "h": 9
       },
       "datasource": {
@@ -833,9 +833,9 @@
       "title": "Container health",
       "description": "Per container: how often it has restarted, whether the kernel has killed it for memory, how close it is to its memory limit (blank means it has none) and how long it has been up.",
       "gridPos": {
-        "x": 10,
+        "x": 8,
         "y": 24,
-        "w": 14,
+        "w": 16,
         "h": 9
       },
       "datasource": {
