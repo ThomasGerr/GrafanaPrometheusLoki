@@ -87,6 +87,8 @@ afterwards, or it will start again next to the new one.
 | `RESTIC_REPOSITORY`, `RESTIC_PASSWORD` | Required with backups: where they go and the password that encrypts them. Plus the storage's own variables, e.g. `AWS_ACCESS_KEY_ID`. |
 | `BACKUP_PATHS`, `BACKUP_DOCKER_VOLUMES` | What to back up besides the databases: host directories, and `true` for every Docker volume. |
 | `BACKUP_DB_<NAME>` | The user a database's dump connects as, when its `DB_<NAME>` user may not read the data. |
+| `PROCESS_GROUP_<NAME>` | Processes whose command line matches this regular expression are reported as `<name>`. See [Naming processes](#naming-processes). |
+| `CONTAINERD_DIR` | Where containerd's socket lives, if not `/run/containerd`. |
 | `BACKUP_SCHEDULE`, `BACKUP_KEEP_*`, `BACKUP_MAX_AGE_HOURS` | When and how long to keep; see [backups.md](backups.md#settings). Schedules added from the dashboard take over from `BACKUP_SCHEDULE`. |
 
 Put a value in single quotes when it contains `$`, a space or `#`, for
@@ -98,6 +100,39 @@ agent shares with it. Set `AGENT_DB_NETWORK` to that network's name
 (`docker inspect <container>` lists them). Databases created on Dokploy's
 *Databases* page are on `dokploy-network`. With `install.sh` this is
 automatic, and it also handles databases spread over several networks.
+
+## Naming processes
+
+The Host Overview dashboard shows which processes are using a machine. They
+are grouped by the name of their program, because that is what the kernel
+offers — and it has two limits worth knowing:
+
+- The name stops at 15 characters, so `.postgres-wrapped` shows as
+  `.postgres-wrapp`.
+- Everything sharing a binary shares a row. Ten pm2-managed apps are all
+  `node`, and every Python service is `python3`.
+
+`PROCESS_GROUP_<NAME>` gives a group its own name by matching the command
+line instead:
+
+```
+PROCESS_GROUP_API=node .*/api/server\.js
+PROCESS_GROUP_WORKER=node .*/worker\.js
+PROCESS_GROUP_BACKUPS=/usr/local/bin/nightly-backup
+```
+
+which reports those processes as `api`, `worker` and `backups`. The patterns
+are tried in order and the first one that matches wins; anything left over
+still falls back to the name of its program, so adding a group changes only
+what it matches. To see what there is to match, on the host:
+
+```bash
+ps -eo pid,comm,args --sort=-pcpu | head -30
+```
+
+The agent writes these into `/etc/alloy/processes.alloy` at start-up and logs
+each one, so `docker logs grafana-prometheus-loki-agent | grep 'reported as'` says what
+it made of them.
 
 ## Removing
 

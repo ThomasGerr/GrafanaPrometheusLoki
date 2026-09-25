@@ -78,27 +78,9 @@ prometheus.exporter.cadvisor "containers" {
   enabled_metrics = ["cpu", "memory", "network", "oom_event"]
 }
 
-// Host processes, grouped by executable name. Containers give a per-container
-// view of CPU and memory; this is the same view of the machine itself, which
-// is the only way to see a runaway process that belongs to no container.
-//
-// Every process is grouped under its own name, so the cost is one small set
-// of series per distinct program, not per PID. Processes inside containers
-// are visible here too: the agent reads the host's /proc.
-prometheus.exporter.process "processes" {
-  procfs_path = "/rootfs/proc"
-
-  // Reading /proc/<pid>/smaps_rollup for every process on every scrape is by
-  // far the most expensive thing this exporter can do, and the resident and
-  // virtual figures below come from the cheap /proc/<pid>/stat instead.
-  gather_smaps = false
-
-  matcher {
-    // Anything with a command line: every process, named after its binary.
-    cmdline = [".+"]
-    name    = "{{.Comm}}"
-  }
-}
+// Host processes are collected too. The exporter itself is generated at
+// start-up into processes.alloy, because PROCESS_GROUP_* variables can name
+// groups of processes and only the host knows what runs on it.
 
 // Alloy's own health. Only `up` and the version leave the host (see
 // prometheus.relabel "keep"); the rest is there for the local UI.

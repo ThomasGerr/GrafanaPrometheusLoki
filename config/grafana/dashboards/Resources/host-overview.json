@@ -720,7 +720,7 @@
       "id": 202,
       "type": "stat",
       "title": "Threads",
-      "description": "Threads across all of them. A process that runs away often shows here first.",
+      "description": "Threads across all of them. A process multiplying out of control often shows here first.",
       "gridPos": {
         "x": 6,
         "y": 22,
@@ -892,11 +892,69 @@
     },
     {
       "id": 205,
-      "type": "table",
-      "title": "Top processes by CPU",
-      "description": "Processes by the CPU they used over the last five minutes, as a percentage of one core. Grouped by program, so four workers of the same name count together.",
+      "type": "timeseries",
+      "title": "CPU by process",
+      "description": "The ten busiest programs, as a percentage of one core. This is where a spike in the CPU graph above gets a name.",
       "gridPos": {
         "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, sum by (groupname) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
+          "refId": "A",
+          "legendFormat": "{{groupname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 206,
+      "type": "table",
+      "title": "Top processes by CPU",
+      "description": "CPU used over the last five minutes, as a percentage of one core. Grouped by program, so four workers of the same name count together.",
+      "gridPos": {
+        "x": 12,
         "y": 26,
         "w": 12,
         "h": 9
@@ -914,8 +972,8 @@
           "expr": "topk(15, sum by (groupname, instance) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
           "refId": "A",
           "instant": true,
-          "format": "table",
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -944,6 +1002,18 @@
               {
                 "id": "custom.width",
                 "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Host"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
               }
             ]
           },
@@ -1000,13 +1070,71 @@
       ]
     },
     {
-      "id": 206,
+      "id": 207,
+      "type": "timeseries",
+      "title": "Memory by process",
+      "description": "The ten programs holding the most memory.",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, sum by (groupname) (namedprocess_namegroup_memory_bytes{memtype=\"resident\", client=~\"$client\", instance=~\"$instance\"}))",
+          "refId": "A",
+          "legendFormat": "{{groupname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 208,
       "type": "table",
       "title": "Top processes by memory",
-      "description": "Processes by the memory they actually hold (resident), grouped by program.",
+      "description": "Memory each program actually holds (resident).",
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 35,
         "w": 12,
         "h": 9
       },
@@ -1023,8 +1151,8 @@
           "expr": "topk(15, sum by (groupname, instance) (namedprocess_namegroup_memory_bytes{memtype=\"resident\", client=~\"$client\", instance=~\"$instance\"}))",
           "refId": "A",
           "instant": true,
-          "format": "table",
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -1053,6 +1181,18 @@
               {
                 "id": "custom.width",
                 "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Host"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
               }
             ]
           },
@@ -1109,71 +1249,13 @@
       ]
     },
     {
-      "id": 207,
-      "type": "timeseries",
-      "title": "CPU by process",
-      "description": "The ten busiest programs over time, as a percentage of one core. This is where a spike in the CPU graph above gets a name.",
-      "gridPos": {
-        "x": 0,
-        "y": 35,
-        "w": 24,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "topk(10, sum by (groupname) (rate(namedprocess_namegroup_cpu_seconds_total{client=~\"$client\", instance=~\"$instance\"}[5m])) * 100)",
-          "refId": "A",
-          "legendFormat": "{{groupname}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 1,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 11,
       "type": "row",
       "title": "Storage & network",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 87,
+        "y": 44,
         "w": 24,
         "h": 1
       },
@@ -1190,7 +1272,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 88,
+        "y": 45,
         "w": 12,
         "h": 8
       },
@@ -1249,7 +1331,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 88,
+        "y": 45,
         "w": 12,
         "h": 8
       },
@@ -1315,7 +1397,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 96,
+        "y": 53,
         "w": 12,
         "h": 8
       },
@@ -1381,7 +1463,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 96,
+        "y": 53,
         "w": 12,
         "h": 8
       },

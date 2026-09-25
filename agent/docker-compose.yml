@@ -84,6 +84,12 @@ services:
       # Container metrics and logs.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker:/var/lib/docker:ro
+      # containerd, which Docker runs containers through. On a host using the
+      # systemd cgroup driver (cgroup v2), cAdvisor cannot read a container at
+      # all without it: the cgroup is named after the container id and only
+      # containerd can say which image that is. Hosts that keep it elsewhere —
+      # a snap install, for one — set CONTAINERD_DIR.
+      - ${CONTAINERD_DIR:-/run/containerd}:/run/containerd:ro
       - /dev/disk:/dev/disk:ro
       # System logs, wherever this host keeps its journal: /var/log/journal
       # when stored on disk, /run/log/journal when only in memory.

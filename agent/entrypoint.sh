@@ -6,6 +6,9 @@
 #
 #   DB_<NAME>=<url>          one database to monitor, e.g.
 #                            DB_APP=postgres://monitor:pw@app-db:5432/app
+#   PROCESS_GROUP_<NAME>     processes whose command line matches this regular
+#                            expression are reported as <name>, e.g.
+#                            PROCESS_GROUP_API='node .*/api/server\.js'
 #   COMPOSE_PROFILES         containing "crowdsec": collect CrowdSec's metrics;
 #                            without "backup": clear old backup results
 #
@@ -20,6 +23,7 @@
 set -uo pipefail
 
 CONNECTIONS=/etc/alloy/connections.alloy
+PROCESSES=/etc/alloy/processes.alloy
 SECRETS=/run/agent-secrets
 # shellcheck source=lib/db-url.sh
 . /usr/local/lib/db-url.sh
@@ -129,5 +133,60 @@ fi
 if [[ ",${COMPOSE_PROFILES:-}," != *,backup,* ]]; then
   rm -f /var/lib/node-textfile/restic.prom
 fi
+
+# ── Generate processes.alloy ────────────────────────────────────────────────
+# Processes are grouped by the name of their executable, which is all the
+# kernel offers: every pm2-managed app is "node", every Python service is
+# "python3", and the name is cut off at 15 characters. PROCESS_GROUP_<NAME>
+# gives a group its own name by matching the command line instead, and is
+# tried before that fallback — first match wins.
+{
+  echo "// Generated at start-up by entrypoint.sh. PROCESS_GROUP_* variables"
+  echo "// name groups of processes; everything else falls back to the name of"
+  echo "// its executable."
+  echo
+  echo 'prometheus.exporter.process "processes" {'
+  echo '  procfs_path = "/rootfs/proc"'
+  echo
+  echo "  // Reading /proc/<pid>/smaps_rollup for every process on every scrape"
+  echo "  // is by far the most expensive thing this exporter can do, and the"
+  echo "  // memory figures come from the cheap /proc/<pid>/stat instead."
+  echo "  gather_smaps = false"
+} > "$PROCESSES"
+
+named=0
+while IFS='=' read -r -d '' key pattern; do
+  [[ "$key" =~ ^PROCESS_GROUP_[A-Za-z0-9_]+$ ]] || continue
+  name="${key#PROCESS_GROUP_}"
+  name="$(tr '[:upper:]_' '[:lower:]-' <<<"$name")"
+  if [[ -z "$pattern" ]]; then
+    log "ERROR skipping $key: it has no pattern to match a command line with"
+    continue
+  fi
+  # Alloy reads this file as one config: a stray quote or backslash would
+  # stop the whole agent, so the pattern is escaped into a string literal.
+  escaped="${pattern//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
+  {
+    echo
+    echo "  matcher {"
+    echo "    cmdline = [\"$escaped\"]"
+    echo "    name    = \"$name\""
+    echo "  }"
+  } >> "$PROCESSES"
+  log "processes matching '$pattern' are reported as '$name'"
+  named=$((named + 1))
+done < <(env -0 | sort -z)
+
+{
+  echo
+  echo "  // Everything else, under the name of its executable."
+  echo "  matcher {"
+  echo '    cmdline = [".+"]'
+  echo '    name    = "{{.Comm}}"'
+  echo "  }"
+  echo "}"
+} >> "$PROCESSES"
+[[ "$named" == 0 ]] || log "$named named process group(s)"
 
 exec /bin/alloy "$@"
