@@ -72,8 +72,10 @@ Over 90% of RAM in use, based on `MemAvailable` — so page cache is already
 excluded and this is real pressure.
 
 The next allocation spike will invoke the OOM killer. Find the consumer on the
-**Containers** dashboard. If it is a container without a memory limit, set one:
-an OOM-killed container restarts, an OOM-killed host does not.
+**Containers** dashboard, or in the Processes section of **Host Overview** if
+it is not a container. The Container health table's **% of limit** column is
+blank for any container without a memory limit; set one, because an OOM-killed
+container restarts and an OOM-killed host does not.
 
 ### HostSwapping
 
